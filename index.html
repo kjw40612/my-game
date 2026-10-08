@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>재원 · 게임 기획자</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Space+Grotesk:wght@500;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="glow"></div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow reveal">Game Designer · Portfolio</p>
+    <h1 class="reveal">재원<span class="period">.</span><span class="sub">JAEWON — SYSTEM &amp; CONTENT DESIGN</span></h1>
+    <ul class="meta reveal">
+      <li>전주대학교 <strong>게임콘텐츠학과</strong></li>
+      <li><strong>2학년</strong> 재학 중</li>
+      <li>전공 <strong>기획</strong></li>
+      <li>Jeonju, KR</li>
+    </ul>
+    <div class="btn-row reveal">
+      <button class="btn" data-scroll="#projects">아이디어 보러가기</button>
+      <button class="btn ghost" data-msg="클릭!">기획서 다운로드</button>
+      <button class="btn ghost" data-msg="클릭!">연락하기</button>
+    </div>
+  </div>
+</header>
+
+<div class="statement">
+  <div class="wrap">
+    <div class="box reveal">
+      <p>저는 <span class="hl">규칙을 만드는 사람</span>입니다.<br>
+      플레이어가 그 규칙 안에서 <span class="accent">가장 자유로워지는 순간</span>을 설계합니다.</p>
+      <footer>— 기획이란 통제가 아니라, 잘 설계된 선택지라고 믿습니다.</footer>
+    </div>
+  </div>
+</div>
+
+<section class="game-sec">
+  <div class="wrap">
+    <div class="game-head reveal">
+      <h2>잠깐, 게임 한 판 어때요?</h2>
+      <span class="hint">W — 점프 · S — 슬라이드</span>
+    </div>
+    <div class="game-frame reveal">
+      <canvas id="dino-canvas" width="800" height="240"></canvas>
+      <div class="game-score">HI <b id="dino-hi">00000</b>&nbsp;&nbsp;<b id="dino-score">00000</b></div>
+      <div class="game-overlay" id="dino-overlay">
+        <div class="go-title" id="dino-overlay-title">시작하려면 클릭하거나 W를 누르세요</div>
+        <p id="dino-overlay-sub">W로 점프, S를 누르고 있으면 슬라이드 — 장애물을 피해보세요</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="projects">
+  <div class="wrap">
+    <div class="sec-head reveal"><h2>게임 아이디어</h2><span>Game Ideas</span></div>
+    <div class="projects">
+
+      <article class="card reveal tilt">
+        <div class="thumb">
+          <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="프리마 아키에스 키 비주얼">
+            <defs>
+              <linearGradient id="s1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#e6e3ee"/><stop offset="100%" stop-color="#dad6e3"/>
+              </linearGradient>
+              <linearGradient id="s1canyon" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#8d84b3" stop-opacity=".28"/>
+                <stop offset="100%" stop-color="#8d84b3" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <rect width="400" height="300" fill="url(#s1)"/>
+            <!-- 협곡 (위가 좁고 아래가 넓은 깔때기) -->
+            <path d="M172 0 L228 0 L300 300 L100 300 Z" fill="url(#s1canyon)"/>
+            <g stroke="#b7b1c4" stroke-width="1" opacity=".5">
+              <path d="M172 0 L100 300 M228 0 L300 300"/>
+            </g>
+            <!-- 성벽 -->
+            <rect x="92" y="248" width="216" height="16" rx="2" fill="#8d84b3"/>
+            <g fill="#8d84b3"><rect x="100" y="238" width="14" height="12"/><rect x="128" y="238" width="14" height="12"/>
+              <rect x="258" y="238" width="14" height="12"/><rect x="286" y="238" width="14" height="12"/></g>
+            <!-- 사령관 -->
+            <circle cx="200" cy="222" r="9" fill="#3a3640"/>
+            <!-- 몰려오는 괴수 무리 -->
+            <g fill="#3a3640" opacity=".85">
+              <circle cx="190" cy="150" r="6"/><circle cx="206" cy="140" r="5"/>
+              <circle cx="178" cy="120" r="5"/><circle cx="214" cy="112" r="6"/>
+              <circle cx="198" cy="90" r="5"/><circle cx="184" cy="62" r="5"/>
+              <circle cx="212" cy="54" r="5"/>
+            </g>
+            <!-- 괴수왕 (가장 크고 위쪽) -->
+            <circle cx="200" cy="28" r="12" fill="#3a3640"/>
+            <circle cx="200" cy="28" r="18" fill="none" stroke="#8d84b3" stroke-width="1.6" opacity=".6"/>
+            <g fill="#8d84b3" opacity=".4">
+              <rect x="24" y="24" width="5" height="5"/><rect x="371" y="24" width="5" height="5"/>
+              <rect x="24" y="271" width="5" height="5"/><rect x="371" y="271" width="5" height="5"/>
+            </g>
+          </svg>
+        </div>
+        <div>
+          <h3>프리마 아키에스</h3>
+          <span class="en">PRIMA ACIES · 탑다운 핵앤슬래시 디펜스</span>
+          <p>괴수가 몰려오는 대협곡의 요새를 사령관이 직접 싸우며 지키는 탑다운 웨이브 방어 게임. 핵앤슬래시의 손맛과 디펜스의 운영을 한 판에 묶었고, 자원을 직접 주우러 나가야 성벽이 위험해지는 긴장을 핵심 재미로 설계했습니다.</p>
+          <ul class="tags"><li>웹 · 바이브 코딩</li><li>핵앤슬래시+디펜스</li><li>시스템 기획</li><li>GitHub Pages</li></ul>
+          <button class="btn ghost" data-project="prima-acies">자세히 보기</button>
+        </div>
+      </article>
+
+      <article class="card reveal tilt">
+        <div class="thumb">
+          <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="어크로스 더 프론트라인 키 비주얼">
+            <defs>
+              <linearGradient id="s3" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#ddd8e7"/><stop offset="55%" stop-color="#e6e3ee"/><stop offset="100%" stop-color="#d9d5e2"/>
+              </linearGradient>
+            </defs>
+            <rect width="400" height="300" fill="url(#s3)"/>
+            <g stroke="#b7b1c4" stroke-width="1" opacity=".5">
+              <path d="M0 90H400M0 150H400M0 210H400"/>
+            </g>
+            <!-- 왼쪽: 괴수 무리와 사체 -->
+            <g fill="#3a3640" opacity=".55">
+              <circle cx="40" cy="196" r="7"/><circle cx="60" cy="210" r="6"/>
+              <circle cx="78" cy="190" r="8"/><circle cx="54" cy="178" r="5"/>
+              <circle cx="92" cy="206" r="6"/>
+            </g>
+            <!-- 주인공 (강조) -->
+            <circle cx="120" cy="188" r="9" fill="#8d84b3"/>
+            <circle cx="120" cy="188" r="15" fill="none" stroke="#8d84b3" stroke-width="1.6" opacity=".6"/>
+            <!-- 전장 중앙: 더 많은 무리가 밀려듦 -->
+            <g fill="#3a3640" opacity=".4">
+              <circle cx="160" cy="200" r="6"/><circle cx="180" cy="182" r="7"/>
+              <circle cx="200" cy="206" r="5"/><circle cx="220" cy="190" r="6"/>
+            </g>
+            <!-- 오른쪽: 성벽과 병사 -->
+            <rect x="330" y="60" width="18" height="190" fill="#8d84b3"/>
+            <g fill="#8d84b3"><rect x="330" y="48" width="18" height="12"/></g>
+            <g fill="#3a3640">
+              <rect x="290" y="176" width="10" height="26" rx="2"/>
+              <rect x="306" y="170" width="10" height="32" rx="2"/>
+            </g>
+            <!-- 포격 궤적 -->
+            <path d="M348 90 Q260 60 160 188" fill="none" stroke="#8d84b3" stroke-width="1.6" stroke-dasharray="3 6" opacity=".55"/>
+            <circle cx="160" cy="188" r="3" fill="#8d84b3" opacity=".7"/>
+            <g fill="#8d84b3" opacity=".4">
+              <rect x="24" y="24" width="5" height="5"/><rect x="371" y="24" width="5" height="5"/>
+              <rect x="24" y="271" width="5" height="5"/><rect x="371" y="271" width="5" height="5"/>
+            </g>
+          </svg>
+        </div>
+        <div>
+          <h3>어크로스 더 프론트라인</h3>
+          <span class="en">ACROSS THE FRONTLINE · 횡스크롤 전선 돌파</span>
+          <p>괴수왕의 진군에 휩쓸린 약하지만 영리한 괴물이, 동족의 죽음을 발판 삼아 강해지며 인간의 전선을 넘는 횡스크롤 게임. 아군이 죽을수록 자원이 생기는 뒤집힌 경제가 정체성이며, 프리마 아키에스와 같은 총력전을 반대편 시점에서 그리는 거울상 구조입니다.</p>
+          <ul class="tags"><li>웹 · 바이브 코딩</li><li>횡스크롤</li><li>세계관 연계작</li><li>기획 단계</li></ul>
+          <button class="btn ghost" data-project="across-frontline">자세히 보기</button>
+        </div>
+      </article>
+
+      <article class="card reveal tilt">
+        <div class="thumb">
+          <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MYTHIC RUN 키 비주얼">
+            <defs>
+              <linearGradient id="s2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#e7e4ee"/><stop offset="100%" stop-color="#dbd7e4"/>
+              </linearGradient>
+            </defs>
+            <rect width="400" height="300" fill="url(#s2)"/>
+            <g stroke="#b7b1c4" stroke-width="1.4" opacity=".6">
+              <path d="M-20 250 Q120 200 200 210 T420 190"/>
+              <path d="M-20 275 Q120 228 200 236 T420 218"/>
+            </g>
+            <g fill="#b7b1c4" opacity=".5">
+              <circle cx="70" cy="70" r="2"/><circle cx="130" cy="48" r="1.6"/><circle cx="300" cy="60" r="2.2"/>
+              <circle cx="340" cy="96" r="1.5"/><circle cx="230" cy="40" r="1.4"/>
+            </g>
+            <!-- 뒤쪽 실루엣 (교대되는 러너) -->
+            <g fill="#c7c2d2">
+              <rect x="132" y="150" width="14" height="34" rx="4"/>
+              <circle cx="139" cy="140" r="9"/>
+              <rect x="122" y="184" width="10" height="26" rx="3"/>
+              <rect x="144" y="184" width="10" height="26" rx="3"/>
+            </g>
+            <!-- 앞쪽 러너 -->
+            <g fill="#8d84b3">
+              <rect x="182" y="140" width="16" height="40" rx="5"/>
+              <circle cx="191" cy="128" r="11"/>
+              <rect x="168" y="176" width="12" height="32" rx="3"/>
+              <rect x="198" y="176" width="12" height="32" rx="3"/>
+              <rect x="196" y="150" width="20" height="8" rx="3"/>
+            </g>
+            <!-- 태그 마크 -->
+            <path d="M191 96 l8 14 -16 0z" fill="#8d84b3"/>
+            <circle cx="191" cy="86" r="4" fill="#8d84b3"/>
+            <!-- 모션 라인 -->
+            <g stroke="#8d84b3" stroke-width="2" opacity=".5">
+              <path d="M150 210 H120"/><path d="M158 224 H132"/>
+            </g>
+            <g fill="#8d84b3" opacity=".35">
+              <rect x="24" y="24" width="5" height="5"/><rect x="371" y="24" width="5" height="5"/>
+              <rect x="24" y="271" width="5" height="5"/><rect x="371" y="271" width="5" height="5"/>
+            </g>
+          </svg>
+        </div>
+        <div>
+          <h3>MYTHIC RUN</h3>
+          <span class="en">MYTHIC RUN · 라마야나 기반 러너</span>
+          <p>시타를 구하러 랑카로 향하는 라마야나의 여정을 러너로 옮긴 게임. 라마와 하누만을 번갈아 태그하며 달리는 것이 핵심 메커닉으로, 다가오는 장애물을 보고 누구를 앞세울지 순간 판단하는 재미를 MDA 프레임워크로 다듬었습니다.</p>
+          <ul class="tags"><li>러너</li><li>태그 메커닉</li><li>MDA 프레임워크</li><li>웹 · 모바일</li></ul>
+          <button class="btn ghost" data-project="mythic-run">자세히 보기</button>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section id="about">
+  <div class="wrap">
+    <div class="sec-head reveal"><h2>기획자로서의 태도</h2><span>How I Work</span></div>
+    <div class="skills">
+      <div class="skill reveal"><div class="num">01</div><h4>구조부터 그린다</h4><p>재미있는 아이디어보다 먼저, 그 재미가 반복될 수 있는 구조를 찾습니다. 코어 루프가 서면 나머지는 따라옵니다.</p></div>
+      <div class="skill reveal"><div class="num">02</div><h4>비주얼로 설득한다</h4><p>콘셉트 아트와 레퍼런스로 기획서를 보완합니다. 팀이 같은 그림을 보고 있을 때 개발 속도가 달라집니다.</p></div>
+      <div class="skill reveal"><div class="num">03</div><h4>숫자로 검증한다</h4><p>플레이테스트 기록과 밸런스 테이블로 감을 확인합니다. 취향이 아니라 데이터로 설명할 수 있는 기획을 지향합니다.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer class="end">
+  <div class="wrap">
+    <span>전주대학교 게임콘텐츠학과 · 게임기획 전공</span>
+    <span class="sig">JAEWON &copy; 2026</span>
+  </div>
+</footer>
+
+<div id="toast-zone" aria-live="polite"></div>
+
+<div id="detail-modal" aria-hidden="true">
+  <div class="detail-backdrop" data-close></div>
+  <div class="detail-box" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <button class="detail-close" data-close aria-label="닫기">✕</button>
+    <p class="detail-eyebrow" id="detail-eyebrow"></p>
+    <h3 id="detail-title"></h3>
+    <p class="detail-sub" id="detail-sub"></p>
+    <div class="detail-body" id="detail-body"></div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
