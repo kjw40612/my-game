@@ -166,6 +166,7 @@ section{padding:clamp(44px,8vw,80px) 0;}
 footer.end{padding:36px 0 64px;border-top:1px solid var(--line);margin-top:40px;}
 footer.end .wrap{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;font-size:13px;color:var(--ink-soft);}
 .sig{font-family:"Space Grotesk",sans-serif;letter-spacing:.16em;}
+.deploy{margin:16px 0 0;text-align:center;font-size:10px;color:var(--ink-soft);opacity:.7;}
 
 /* ── 토스트 ── */
 #toast-zone{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;}
