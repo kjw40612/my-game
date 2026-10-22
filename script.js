@@ -67,7 +67,7 @@ for (let i = 0; i < 30; i++) {
 // 갑각 짐승의 묵직한 걸음
 // 한 걸음 = STEP_FRAMES 프레임. 앞쪽 STEP_MOVE 프레임 동안만 움직이고 나머지는 멈춰 선다
 const STEP_FRAMES = 80;   // 한 걸음에 걸리는 프레임 수 (60이면 1초)
-const STEP_MOVE = 28;     // 그중 실제로 움직이는 프레임 수
+const STEP_MOVE = 10;     // 그중 실제로 움직이는 프레임 수
 let frame = 0;            // 게임이 시작된 뒤 지나간 프레임 수
 let shake = 0;            // 화면 흔들림 세기. 발이 땅에 닿으면 커졌다가 점점 줄어든다
 
