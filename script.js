@@ -31,9 +31,31 @@ const FOOT = {
 // 게임 상태 (계속 바뀌는 숫자들 → let)
 // =====================================================
 
-// 사령관 발밑 위치. 이번 주에는 움직이지 않는다 (조작은 5장)
+// 사령관 발밑 위치. 5장부터 플레이어가 조작한다
 let commanderX = 400;
 let commanderY = 760;
+let facingLeft = false;   // 사령관이 왼쪽을 보고 있는가 (마우스 쪽을 바라본다)
+
+// =====================================================
+// 조작 설정 (5장)
+// =====================================================
+const MOVE_SPEED = 4;       // 사령관 이동 속도: 한 프레임에 움직이는 픽셀 수
+
+// 사령관이 움직일 수 있는 범위 (양옆 절벽 안쪽, 성벽 앞까지)
+const FIELD_LEFT = 110;
+const FIELD_RIGHT = 610;
+const FIELD_TOP = 140;
+const FIELD_BOTTOM = WALL_Y - 20;
+const COMMANDER_HALF = 16;  // 사령관 몸 폭의 절반. 벽에 몸이 반쯤 박히지 않게 쓴다
+
+// 베기 (클릭). 6장에서 괴수에게 맞게 만들 예정이고, 지금은 궤적만 보인다
+const SLASH_FRAMES = 10;    // 베기 궤적이 화면에 남는 프레임 수
+let slashTimer = 0;         // 0보다 크면 베는 중
+let slashAngle = 0;         // 베는 방향 (마우스 쪽)
+
+// 마우스 위치 (캔버스 기준 좌표)
+let mouseX = 400;
+let mouseY = 400;
 
 // 괴수들: 위치(x, y)와 속도(speed). speed = 한 프레임에 아래로 내려가는 픽셀 수
 let monsters = [
@@ -67,7 +89,7 @@ for (let i = 0; i < 30; i++) {
 // 갑각 짐승의 묵직한 걸음
 // 한 걸음 = STEP_FRAMES 프레임. 앞쪽 STEP_MOVE 프레임 동안만 움직이고 나머지는 멈춰 선다
 const STEP_FRAMES = 80;   // 한 걸음에 걸리는 프레임 수 (60이면 1초)
-const STEP_MOVE = 10;     // 그중 실제로 움직이는 프레임 수
+const STEP_MOVE = 28;     // 그중 실제로 움직이는 프레임 수
 let frame = 0;            // 게임이 시작된 뒤 지나간 프레임 수
 let shake = 0;            // 화면 흔들림 세기. 발이 땅에 닿으면 커졌다가 점점 줄어든다
 
@@ -75,6 +97,46 @@ let shake = 0;            // 화면 흔들림 세기. 발이 땅에 닿으면 �
 let wave = 1;
 let wallHp = 1000;
 let essenceCount = 30;
+
+// =====================================================
+// 입력 (5장) — 이벤트는 "기록만" 하고, 움직이는 건 게임 루프가 한다 (방식 B)
+// =====================================================
+const keys = {};   // 지금 눌려 있는 키를 적어 두는 메모장. 예: keys["ArrowLeft"] = true
+
+document.addEventListener("keydown", function (e) {
+  // 방향키와 스페이스바를 눌러도 페이지가 스크롤되지 않게 막는다
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+    e.preventDefault();
+  }
+  keys[e.key] = true;    // 눌렸다고 적어 둔다
+});
+
+document.addEventListener("keyup", function (e) {
+  keys[e.key] = false;   // 떼었다고 적어 둔다
+});
+
+// 마우스 좌표를 캔버스 기준 좌표로 바꾼다
+// 캔버스가 CSS로 화면 크기에 맞게 줄어들어 있어서, 비율(canvas.width / rect.width)도 곱해야 한다
+function toCanvasPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (canvas.width / rect.width),
+    y: (e.clientY - rect.top) * (canvas.height / rect.height),
+  };
+}
+
+canvas.addEventListener("mousemove", function (e) {
+  const pos = toCanvasPos(e);
+  mouseX = pos.x;
+  mouseY = pos.y;
+});
+
+canvas.addEventListener("mousedown", function (e) {
+  const pos = toCanvasPos(e);
+  slashTimer = SLASH_FRAMES;   // 베기 시작
+  // 사령관 가슴 높이에서 마우스 쪽을 향하는 각도
+  slashAngle = Math.atan2(pos.y - (commanderY - 40), pos.x - commanderX);
+});
 
 // =====================================================
 // 그리기 도우미: 이미지를 "발밑" 기준으로 놓는다
@@ -100,6 +162,25 @@ function gameLoop() {
   ctx.clearRect(0, 0, W, H);
 
   // ② 계산하기 (상태를 바꾼다)
+
+  // 사령관 이동: 지금 눌려 있는 키를 보고 움직인다 (방향키와 WASD 둘 다)
+  if (keys["ArrowLeft"] || keys["a"]) commanderX = commanderX - MOVE_SPEED;
+  if (keys["ArrowRight"] || keys["d"]) commanderX = commanderX + MOVE_SPEED;
+  if (keys["ArrowUp"] || keys["w"]) commanderY = commanderY - MOVE_SPEED;    // 위로 가려면 y를 줄인다
+  if (keys["ArrowDown"] || keys["s"]) commanderY = commanderY + MOVE_SPEED;
+
+  // 벽 막기: 사령관 위치는 "발밑 가운데"라서 몸 폭의 절반만큼 안쪽에서 멈춘다
+  if (commanderX - COMMANDER_HALF < FIELD_LEFT) commanderX = FIELD_LEFT + COMMANDER_HALF;
+  if (commanderX + COMMANDER_HALF > FIELD_RIGHT) commanderX = FIELD_RIGHT - COMMANDER_HALF;
+  if (commanderY < FIELD_TOP) commanderY = FIELD_TOP;
+  if (commanderY > FIELD_BOTTOM) commanderY = FIELD_BOTTOM;
+
+  // 마우스가 사령관보다 왼쪽에 있으면 왼쪽을 바라본다
+  facingLeft = mouseX < commanderX;
+
+  // 베기 궤적은 정해진 프레임 동안만 보인다
+  if (slashTimer > 0) slashTimer = slashTimer - 1;
+
   frame = frame + 1;
   const step = frame % STEP_FRAMES;  // 지금이 한 걸음 중 몇 번째 프레임인지 (0 ~ 79)
 
@@ -150,10 +231,11 @@ function gameLoop() {
   for (const m of monsters) {
     if (m.y < commanderY) drawMonster(m, step);  // 사령관보다 뒤(위)에 있는 괴수
   }
-  drawSprite("commander", commanderX, commanderY);
+  drawCommander();
   for (const m of monsters) {
     if (m.y >= commanderY) drawMonster(m, step); // 사령관보다 앞(아래)에 있는 괴수
   }
+  drawSlash();
 
   ctx.drawImage(images.front, 0, 0);   // 성벽과 테두리 어둠은 맨 앞에
   ctx.restore();                       // 흔들림 끝. 글자는 흔들리지 않게 그 뒤에 쓴다
@@ -161,6 +243,33 @@ function gameLoop() {
 
   // ④ 다음 프레임에 나를 또 불러 달라고 부탁한다
   requestAnimationFrame(gameLoop);
+}
+
+// =====================================================
+// 사령관과 베기 그리기 (5장)
+// =====================================================
+function drawCommander() {
+  if (facingLeft) {
+    // 왼쪽을 볼 때는 사령관 위치를 기준으로 그림을 좌우로 뒤집어서 그린다
+    ctx.save();
+    ctx.translate(commanderX, 0);
+    ctx.scale(-1, 1);
+    drawSprite("commander", 0, commanderY);
+    ctx.restore();
+  } else {
+    drawSprite("commander", commanderX, commanderY);
+  }
+}
+
+function drawSlash() {
+  if (slashTimer <= 0) return;
+  const progress = slashTimer / SLASH_FRAMES;          // 1 → 0 으로 줄어든다
+  ctx.strokeStyle = `rgba(255, 244, 200, ${progress})`; // 레몬 크림색, 점점 흐려진다
+  ctx.lineWidth = 10 * progress + 2;
+  ctx.beginPath();
+  // 사령관 가슴 높이를 중심으로, 마우스 쪽을 향해 부채꼴 모양으로 휘두른다
+  ctx.arc(commanderX, commanderY - 40, 80, slashAngle - 0.9, slashAngle + 0.9);
+  ctx.stroke();
 }
 
 // =====================================================
@@ -196,6 +305,12 @@ function drawText() {
   drawSprite("essence", W - 120, panelY + 44);
   ctx.font = `700 26px ${font}`;
   ctx.fillText(essenceCount, W - 98, panelY + 54);
+
+  // 조작 안내
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(233, 228, 214, 0.45)";
+  ctx.font = `400 16px ${font}`;
+  ctx.fillText("이동 WASD / 방향키   조준 마우스   베기 클릭", W / 2, panelY + 100);
 }
 
 // =====================================================
