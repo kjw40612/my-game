@@ -89,11 +89,12 @@ const WAVE_TITLES = [
 
 // 괴수 종류별 값
 // r = 몸 반지름, hp = 체력, mass = 무게(무거울수록 덜 밀린다), wallDmg = 성벽에 닿으면 깎는 체력, xp = 경험치
+// aggro = 사령관이 이 거리 안에 들어오면 성벽 대신 사령관을 쫓아가 공격한다. dmg = 사령관에게 주는 피해, atkCd = 공격 간격(초)
 // shield = 보호막. 남아 있는 동안 원거리 공격(병사)에 면역이고, 근접 공격은 보호막부터 깎는다
 // 굶주린 무리와 갑각 짐승의 speed는 "한 프레임에 내려가는 픽셀", 정수 포식자 계열은 "1초에 움직이는 픽셀"
 const MONSTER_TYPES = {
-  grunt:   { r: 16, hp: 30,  mass: 1,  speedMin: 0.8, speedMax: 1.3, wallDmg: 50,  drop: 1, xp: 1 },
-  brute:   { r: 36, hp: 120, shield: 30, mass: 4, speed: 1.4,      wallDmg: 150, drop: 4, xp: 5 },
+  grunt:   { r: 16, hp: 30,  mass: 1,  speedMin: 0.8, speedMax: 1.3, wallDmg: 50,  drop: 1, xp: 1, aggro: 130, dmg: 6,  atkCd: 1.0 },
+  brute:   { r: 36, hp: 120, shield: 30, mass: 4, speed: 1.4,      wallDmg: 150, drop: 4, xp: 5, aggro: 110, dmg: 18, atkCd: 1.6 },
   eater:   { r: 15, hp: 40,  mass: 0.8, speed: 90,                 wallDmg: 50,  drop: 2, xp: 3 },
   crystal: { r: 46, hp: 280, shield: 90, mass: 12, speed: 40, dmg: 24, atkCd: 1.4, wallDmg: 250, drop: 10, xp: 20 },
 };
@@ -300,7 +301,7 @@ function spawnMonster(type, x, y) {
     hp: t.hp * hpMul, maxHp: t.hp * hpMul,
     shield: (t.shield || 0) * hpMul, maxShield: (t.shield || 0) * hpMul,
     kvx: 0, kvy: 0, flash: 0, slow: 0, deflectT: 0, dead: false,
-    eaten: 0, evolving: 0, beamCd: EAT.beamCd, charge: 0, stagger: 0, aimX: 0, aimY: 1, atkTimer: 0,
+    eaten: 0, evolving: 0, beamCd: EAT.beamCd, charge: 0, stagger: 0, aimX: 0, aimY: 1, atkTimer: rand(0, t.atkCd || 1),
   });
 }
 
@@ -383,7 +384,10 @@ function gameLoop(now) {
   }
   for (const d of dust) { d.y = d.y + d.speed; if (d.y > WALL_Y) d.y = 0; }
   if (gameState !== "levelup") {
-    for (const e of effects) e.t += dt;
+    for (const e of effects) {
+      e.t += dt;
+      if (e.kind === "spark") { e.x += e.vx * dt; e.y += e.vy * dt; e.vx *= 0.9; e.vy *= 0.9; }
+    }
     effects = effects.filter(e => e.t < e.dur);
     if (banner) { banner.t += dt; if (banner.t > banner.dur) banner = null; }
   }
@@ -426,13 +430,7 @@ function update(dt, step) {
     m.kvx *= decay; m.kvy *= decay;
     if (m.type === "eater") { updateEater(m, dt); continue; }
     if (m.type === "crystal") { updateCrystal(m, dt); continue; }
-    const slowMul = m.slow > 0 ? 0.55 : 1;          // 포효에 맞으면 느려진다
-    if (m.type === "brute") {
-      if (step < STEP_MOVE) m.y += m.speed * slowMul;
-      if (step === STEP_MOVE && m.y > 0) shake = Math.max(shake, 6);
-    } else {
-      m.y += m.speed * slowMul;
-    }
+    updateMelee(m, step, dt);
   }
 
   separate();
@@ -465,6 +463,35 @@ function update(dt, step) {
     if (breakTimer <= 0) startNextWave();
   }
   if (pendingLevelUps > 0) openLevelUp();
+}
+
+// ---------- 굶주린 무리, 갑각 짐승 ----------
+// 사령관이 aggro 거리 안에 있으면 쫓아가고, 몸이 닿으면 atkCd초마다 공격한다. 아니면 성벽으로 내려간다
+function updateMelee(m, step, dt) {
+  const t = MONSTER_TYPES[m.type], p = player;
+  const slowMul = m.slow > 0 ? 0.55 : 1;          // 포효에 맞으면 느려진다
+
+  // 이번 프레임에 움직일 거리 (한 프레임에 몇 픽셀)
+  let move = m.speed * slowMul;
+  if (m.type === "brute") {                       // 갑각 짐승은 한 걸음 내딛는 동안만 움직인다
+    if (step >= STEP_MOVE) move = 0;
+    if (step === STEP_MOVE && m.y > 0) shake = Math.max(shake, 6);
+  }
+
+  m.atkTimer -= dt;
+  const d = dist(m.x, m.y, p.x, p.y);
+  const chase = p.downed <= 0 && d < t.aggro;
+
+  if (chase) {
+    if (d <= m.r + p.r + 6) {                     // 닿았다: 멈춰서 공격
+      if (m.atkTimer <= 0) { hurtPlayer(t.dmg, m.x, m.y, 6); m.atkTimer = t.atkCd; }
+    } else {                                      // 사령관 쪽으로 다가간다
+      m.x += (p.x - m.x) / d * move;
+      m.y += (p.y - m.y) / d * move;
+    }
+  } else {
+    m.y += move;                                  // 성벽으로 내려간다
+  }
 }
 
 // ---------- 사령관 ----------
@@ -595,17 +622,33 @@ function useSkill(i) {
   }
 }
 
-function hurtPlayer(dmg) {
+// 사령관이 맞았을 때: 잠깐 하얗게 번쩍이고(flash), 0.35초 무적(깜빡임), 화면 흔들림, 피해 숫자, 핏빛 파편
+// knock만큼 공격한 쪽 반대로 밀려난다
+function hurtPlayer(dmg, fromX, fromY, knock = 0) {
   const p = player;
   if (p.downed > 0 || p.invuln > 0) return false;
   p.hp -= dmg; p.invuln = 0.35; p.flash = 0.12;
   shake = Math.max(shake, 6);
   addText(p.x, p.y - 100, "-" + Math.round(dmg), "#ff8a7a", 0.7, 20);
+  burst(p.x, p.y - 36, COLOR.blood, 6);
+  if (knock) {
+    const d = dist(fromX, fromY, p.x, p.y) || 1;
+    p.x += (p.x - fromX) / d * knock; p.y += (p.y - fromY) / d * knock;
+    clampPlayer();
+  }
   if (p.hp <= 0) {
     p.hp = 0; p.downed = PLAYER.downTime;
     addText(p.x, p.y - 120, "사령관이 쓰러졌다", COLOR.blood, 1.8, 24);
   }
   return true;
+}
+
+// 작은 파편이 사방으로 튄다
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), sp = rand(60, 260);
+    effects.push({ kind: "spark", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, dur: rand(0.25, 0.5), color, size: rand(2, 5) });
+  }
 }
 
 function addText(x, y, text, color, dur, size) {
@@ -914,7 +957,7 @@ function updateCrystal(m, dt) {
 
   m.atkTimer -= dt;
   if (p.downed <= 0 && dist(m.x, m.y, p.x, p.y) <= m.r + p.r + 6) {
-    if (m.atkTimer <= 0) { hurtPlayer(MONSTER_TYPES.crystal.dmg); m.atkTimer = MONSTER_TYPES.crystal.atkCd; }
+    if (m.atkTimer <= 0) { hurtPlayer(MONSTER_TYPES.crystal.dmg, m.x, m.y, 20); m.atkTimer = MONSTER_TYPES.crystal.atkCd; }
     return;
   }
   m.y += m.speed * (m.slow > 0 ? 0.55 : 1) * dt;
@@ -929,7 +972,7 @@ function fireBeam(m) {
   const side = Math.abs(px * m.aimY - py * m.aimX);   // 빔 직선에서 옆으로 얼마나 떨어져 있는가
   if (p.downed <= 0 && p.invuln <= 0 && along > 0 && side < p.r + 14) {
     ex = sx + m.aimX * along; ey = sy + m.aimY * along;
-    hurtPlayer(EAT.beamDmg);
+    hurtPlayer(EAT.beamDmg, sx, sy, 50);
   } else {
     const tWall = m.aimY > 0 ? (WALL_Y - sy) / m.aimY : Infinity;
     const wx = sx + m.aimX * tWall;
@@ -999,6 +1042,10 @@ function drawWorld(step) {
       ctx.strokeStyle = `rgba(${e.color}, ${1 - k})`;
       ctx.lineWidth = 10 * (1 - k) + 2;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (0.7 + 0.3 * k), e.a - e.half, e.a + e.half); ctx.stroke();
+    } else if (e.kind === "spark") {
+      ctx.globalAlpha = 1 - k;
+      ctx.fillStyle = e.color; ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+      ctx.globalAlpha = 1;
     } else if (e.kind === "ring") {   // 포효 파동
       ctx.strokeStyle = `rgba(140, 190, 230, ${1 - k})`; ctx.lineWidth = 6;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r0 + (e.r1 - e.r0) * k, 0, Math.PI * 2); ctx.stroke();
@@ -1282,6 +1329,8 @@ function drawCommander() {
     drawSprite("commander", p.x, p.y);
   }
   ctx.filter = "none";
+  ctx.strokeStyle = "rgba(217, 222, 229, 0.5)"; ctx.lineWidth = 2;   // 조준 방향 표시
+  ctx.beginPath(); ctx.arc(p.x, p.y - 36, 30, p.aim - 0.25, p.aim + 0.25); ctx.stroke();
   ctx.globalAlpha = 1;
   if (p.hp < p.maxHp) {
     const bw = 44, bx = p.x - bw / 2, by = p.y - 100;
