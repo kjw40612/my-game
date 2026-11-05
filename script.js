@@ -123,6 +123,8 @@ const SOLDIERS = {
 const SLOT_X = [138, 234, 330, 426, 522, 618];  // 흉벽 톱니 사이 빈자리
 const SLOT_UNLOCK_ORDER = [2, 3, 1, 4, 0, 5];   // 가운데 자리부터 열린다
 const START_SLOTS = 2;                          // 처음 열려 있는 자리 수
+const SOLDIER_SCALE = 2;                        // 병사 그림 크기 배율 (사령관 키의 75% 정도)
+const SOLDIER_FOOT_Y = 1112;                    // 병사 발밑 y. 성벽 윗면 통로(1060~1100)를 밟고 선다
 
 // 정비 시간 상점
 const SHOP = [
@@ -733,7 +735,7 @@ function updateSoldiers(dt) {
     const def = SOLDIERS[s.type];
     s.timer -= dt;
     if (s.timer > 0) continue;
-    const sx = slot.x, sy = WALL_Y + 8;
+    const sx = slot.x, sy = SOLDIER_FOOT_Y - 20 * SOLDIER_SCALE;
     let target = null;
     for (const m of monsters) {                    // 사거리 안에서 성벽에 가장 가까운 괴수
       if (m.dead || m.y < 0 || dist(sx, sy, m.x, m.y) > def.range) continue;
@@ -1018,8 +1020,10 @@ function drawWorld(step) {
     ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(p.x, p.y, p.magnet, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
   }
 
-  // 성벽, 병사, 테두리 어둠
+  // 성벽 → 통로 바닥 → 병사(통로 위) → 병사 자리 표시 → 테두리 어둠 순서
   ctx.drawImage(images.wall, 0, 0);
+  drawWallBase();
+  drawWalkway();
   if (wallHp < WALL_MAX) {   // 깎인 만큼 균열
     ctx.strokeStyle = "rgba(15, 17, 22, 0.75)"; ctx.lineWidth = 2;
     const cracks = Math.floor((1 - wallHp / WALL_MAX) * 10);
@@ -1028,6 +1032,7 @@ function drawWorld(step) {
       ctx.beginPath(); ctx.moveTo(cx, WALL_Y + 2); ctx.lineTo(cx + 8, WALL_Y + 20); ctx.lineTo(cx - 4, WALL_Y + 40); ctx.lineTo(cx + 6, WALL_Y + 72); ctx.stroke();
     }
   }
+  drawSoldierBodies();
   drawSoldiers();
 
   for (const e of effects) {   // 떠오르는 글자
@@ -1044,41 +1049,102 @@ function drawWorld(step) {
   ctx.restore();
 }
 
-// 성벽 위 병사와 빈자리. 휴식 중에는 자리를 눌러 배치·강화할 수 있다
+// 성벽 그림(wall.png)은 y=1140에서 끝난다. 그 아래를 같은 벽돌로 화면 끝까지 이어서
+// 아래쪽 인터페이스 뒤로 협곡이 비치지 않게 한다. 아래로 갈수록 어두워져 글자가 잘 보인다
+const WALL_IMG_BOTTOM = 1140;
+function drawWallBase() {
+  const top = WALL_IMG_BOTTOM, bottom = H + 20;   // 화면이 흔들려도 틈이 안 보이게 조금 더 그린다
+  ctx.fillStyle = "#6e7172";
+  ctx.fillRect(-20, top, W + 40, bottom - top);
+  ctx.strokeStyle = "rgba(40, 44, 50, 0.6)"; ctx.lineWidth = 2;   // 벽돌 이음새
+  ctx.beginPath();
+  for (let y = top, row = 0; y < bottom; y += 20, row++) {
+    ctx.moveTo(-20, y); ctx.lineTo(W + 20, y);
+    for (let x = (row % 2) * 24 - 24; x < W + 20; x += 48) { ctx.moveTo(x, y); ctx.lineTo(x, y + 20); }
+  }
+  ctx.stroke();
+  const g = ctx.createLinearGradient(0, top, 0, H);
+  g.addColorStop(0, "rgba(8, 10, 14, 0.15)");
+  g.addColorStop(1, "rgba(8, 10, 14, 0.8)");
+  ctx.fillStyle = g;
+  ctx.fillRect(-20, top, W + 40, bottom - top);
+}
+
+// 성벽 윗면 통로 바닥. 흉벽(톱니) 아래 띠를 "위에서 내려다본 바닥"으로 보이게 칠한다
+const WALK_TOP = 1064, WALK_BOTTOM = 1124;
+function drawWalkway() {
+  const g = ctx.createLinearGradient(0, WALK_TOP, 0, WALK_BOTTOM);   // 흉벽 쪽은 그늘, 앞쪽은 밝게
+  g.addColorStop(0, "#5f646b");
+  g.addColorStop(0.35, "#868b90");
+  g.addColorStop(1, "#a3a6a7");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, WALK_TOP, W, WALK_BOTTOM - WALK_TOP);
+
+  ctx.fillStyle = "rgba(10, 12, 16, 0.55)";                          // 흉벽 밑동에 진 그림자
+  ctx.fillRect(0, WALK_TOP, W, 3);
+
+  ctx.strokeStyle = "rgba(40, 44, 50, 0.35)"; ctx.lineWidth = 1;     // 바닥 돌판 이음새
+  ctx.beginPath();
+  ctx.moveTo(0, 1090); ctx.lineTo(W, 1090);
+  for (let x = 0; x < W; x += 56) {
+    ctx.moveTo(x, WALK_TOP + 3); ctx.lineTo(x, 1090);
+    ctx.moveTo(x + 28, 1090); ctx.lineTo(x + 28, WALK_BOTTOM);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "#c2c4c2"; ctx.fillRect(0, WALK_BOTTOM - 2, W, 2); // 통로 앞 모서리 (빛 받는 턱)
+  ctx.fillStyle = "rgba(10, 12, 16, 0.5)"; ctx.fillRect(0, WALK_BOTTOM, W, 2);
+}
+
+// 병사 몸: 성벽 윗면 통로를 밟고 서 있다
+function drawSoldierBodies() {
+  for (const slot of slots) {
+    const s = slot.soldier;
+    if (!s) continue;
+    const ry = s.recoil * 10;   // 쏠 때 살짝 뒤로 밀린다
+    ctx.fillStyle = "rgba(10, 12, 16, 0.45)";   // 발밑 그림자
+    ctx.beginPath(); ctx.ellipse(slot.x, SOLDIER_FOOT_Y, 14 * SOLDIER_SCALE, 4 * SOLDIER_SCALE, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(slot.x, SOLDIER_FOOT_Y);
+    ctx.scale(SOLDIER_SCALE, SOLDIER_SCALE);   // 아래 그림은 발밑(0, 0) 기준이라 통째로 키운다
+    if (s.type === "ballista") {
+      ctx.fillStyle = "#3e2f22"; ctx.fillRect(-13, -12, 4, 12); ctx.fillRect(9, -12, 4, 12);   // 받침 다리
+      ctx.fillStyle = "#5a4430"; ctx.fillRect(-18, -20 + ry, 36, 10);
+      ctx.fillStyle = "#8a7354"; ctx.fillRect(-3, -36 + ry, 6, 22);
+    } else {
+      ctx.fillStyle = "#3a4250"; ctx.fillRect(-6, -22 + ry, 12, 22);
+      ctx.fillStyle = "#4b5563"; ctx.beginPath(); ctx.arc(0, -27 + ry, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#8a7354"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(-9, -16 + ry, 10, -1.2, 1.2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// 성벽 위 병사 자리 표시 (강화 단계, 빈자리, 휴식 중 누를 칸). 성벽 위에 그린다
 function drawSoldiers() {
   const interactive = gameState === "break" || gameState === "prep";
   for (const slot of slots) {
-    const x = slot.x, y = WALL_Y + 8;
+    const x = slot.x, y = SOLDIER_FOOT_Y;
     if (interactive && slot.unlocked) {
-      const bx = x - 30, by = WALL_Y - 40, bw = 60, bh = 84;
+      const bx = x - 34, by = y - 80, bw = 68, bh = 112;
       ctx.strokeStyle = slot.soldier ? "rgba(212, 160, 58, 0.5)" : "rgba(233, 228, 214, 0.7)";
       ctx.setLineDash([5, 4]); ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.setLineDash([]);
       buttons.push({ x: bx, y: by, w: bw, h: bh, onClick: () => clickSlot(slot) });
     }
-    if (!slot.unlocked) {
-      ctx.fillStyle = "rgba(10, 12, 16, 0.5)";
-      ctx.beginPath(); ctx.arc(x, y - 10, 7, 0, Math.PI * 2); ctx.fill();
+    if (!slot.unlocked) {   // 아직 열리지 않은 자리: 휴식 중에만 "잠김"이라고 흐리게 보여 준다
+      if (interactive) { ctx.fillStyle = "rgba(233, 228, 214, 0.35)"; ctx.font = `400 14px ${FONT}`; ctx.textAlign = "center"; ctx.fillText("잠김", x, y - 20); }
       continue;
     }
     const s = slot.soldier;
     if (!s) {
-      if (interactive) { ctx.fillStyle = COLOR.ink; ctx.font = `600 30px ${FONT}`; ctx.textAlign = "center"; ctx.fillText("+", x, y - 4); }
+      if (interactive) { ctx.fillStyle = COLOR.ink; ctx.font = `600 30px ${FONT}`; ctx.textAlign = "center"; ctx.fillText("+", x, y - 20); }
       continue;
     }
-    const ry = s.recoil * 20;   // 쏠 때 살짝 뒤로 밀린다
-    if (s.type === "ballista") {
-      ctx.fillStyle = "#5a4430"; ctx.fillRect(x - 18, y - 16 + ry, 36, 10);
-      ctx.fillStyle = "#8a7354"; ctx.fillRect(x - 3, y - 34 + ry, 6, 22);
-    } else {
-      ctx.fillStyle = "#3a4250"; ctx.fillRect(x - 6, y - 22 + ry, 12, 22);
-      ctx.fillStyle = "#4b5563"; ctx.beginPath(); ctx.arc(x, y - 27 + ry, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#8a7354"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x - 9, y - 16 + ry, 10, -1.2, 1.2); ctx.stroke();
-    }
-    for (let i = 0; i < s.level; i++) { ctx.fillStyle = COLOR.gold; ctx.fillRect(x - 10 + i * 8, y + 14, 5, 5); }
+    for (let i = 0; i < s.level; i++) { ctx.fillStyle = COLOR.gold; ctx.fillRect(x - 10 + i * 8, y + 8, 5, 5); }
     if (interactive && s.level < 3) {
       ctx.fillStyle = "rgba(233, 228, 214, 0.7)"; ctx.font = `400 14px ${FONT}`; ctx.textAlign = "center";
-      ctx.fillText(`강화 ${upgradeCost(s)}`, x, y + 36);
+      ctx.fillText(`강화 ${upgradeCost(s)}`, x, y + 28);
     }
   }
 }
