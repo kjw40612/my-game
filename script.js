@@ -11,7 +11,8 @@ const WALL_Y = 1060;      // 성벽 앞쪽 가장자리 y. 괴수가 여기까�
 // =====================================================
 const images = {
   background: "images/background.png", // 협곡 바닥, 햇빛, 절벽
-  front: "images/front.png",           // 성벽, 병사, 화면 테두리 어둠
+  wall: "images/wall.png",             // 성벽 (병사는 코드로 그린다)
+  vignette: "images/vignette.png",     // 화면 테두리와 협곡 입구의 어둠
   commander: "images/commander.png",   // 사령관 + 주변의 성물 빛
   grunt: "images/grunt.png",           // 굶주린 무리
   brute: "images/brute.png",           // 갑각 짐승
@@ -38,24 +39,29 @@ function angleDiff(a, b) {                                       // 두 각도�
   while (d < -Math.PI) d += Math.PI * 2;
   return Math.abs(d);
 }
+function shuffle(arr) {                                          // 배열 순서를 무작위로 섞은 복사본
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 
 // =====================================================
-// 사령관 설정 — 이동·대시·베기 (개발 버전과 같은 값)
-// 속도는 "1초에 움직이는 픽셀 수"다. 프레임이 아니라 실제 시간으로 움직여서 기기마다 같다
+// 사령관 기본값. 특전으로 강해지는 값들이라 게임이 시작될 때 player에 복사해서 쓴다
+// 속도는 "1초에 움직이는 픽셀 수"다
 // =====================================================
 const PLAYER = {
   r: 18,            // 몸 반지름 (충돌 판정용 원)
   speed: 250,       // 이동 속도 (픽셀/초)
   atkDmg: 22,       // 베기 피해
   atkRange: 96,     // 베기가 닿는 거리
-  atkHalf: 0.95,    // 베기 부채꼴의 절반 각도 (라디안, 약 54도 → 전체 약 108도)
+  atkHalf: 0.95,    // 베기 부채꼴의 절반 각도 (라디안)
   atkCd: 0.38,      // 베기 간격(초). 마우스를 누르고 있으면 이 간격으로 계속 벤다
   dashCd: 1.3,      // 대시 재사용 대기(초)
   dashTime: 0.16,   // 대시가 이어지는 시간(초)
   dashSpeed: 950,   // 대시 속도 (픽셀/초)
-  dashInvuln: 0.22, // 대시 중 무적 시간(초). 괴수 사이를 뚫고 지나갈 수 있다
+  dashInvuln: 0.22, // 대시 중 무적 시간(초)
   magnet: 110,      // 정수를 끌어당기는 거리
-  maxHp: 100,       // 사령관 체력. 0이 되면 쓰러졌다가 downTime초 뒤 성벽 앞에서 다시 일어난다
+  maxHp: 100,       // 체력. 0이 되면 쓰러졌다가 downTime초 뒤 성벽 앞에서 다시 일어난다
   downTime: 4,
 };
 
@@ -63,46 +69,15 @@ const PLAYER = {
 const FIELD = { left: 96, right: 624 };
 
 // =====================================================
-// 규칙 설정 (6장) — 난이도 튜닝은 대부분 여기 숫자만 바꾸면 된다
+// 웨이브와 휴식 (6장 + 이번 주)
+// 웨이브마다 나올 괴수가 정해져 있고, 다 잡으면 휴식 시간에 병사를 배치한다
 // =====================================================
-const START_MONSTERS = 5;        // 게임을 시작할 때 화면에 있는 괴수 수
-const SPAWN_START = 1600;        // 새 괴수가 나오는 간격(밀리초). 1600 = 1.6초
-const SPAWN_MIN = 600;           // 웨이브가 올라도 이보다 짧아지지는 않는다
-const WAVE_SECONDS = 30;         // 이만큼 버틸 때마다 웨이브가 하나 오른다
-const BRUTE_CHANCE = 0.15;       // 새 괴수가 갑각 짐승일 확률 (15%)
-const EATER_FROM_WAVE = 6;       // 정수 포식자는 이 웨이브부터 나온다
-const EATER_CHANCE = 0.12;       // 새 괴수가 정수 포식자일 확률 (12%)
-
-// 괴수 종류별 값 (r·hp·mass·drop은 개발 버전과 같다)
-// r = 몸 반지름, hp = 체력, mass = 무게(무거울수록 덜 밀린다), wallDmg = 성벽에 닿으면 깎는 체력
-// shield = 보호막. 남아 있는 동안 원거리 공격에 면역이고, 근접 공격은 보호막부터 깎는다
-// 정수 포식자와 결정 포식수는 speed를 "1초에 움직이는 픽셀"로 쓴다
-const MONSTER_TYPES = {
-  grunt:   { r: 16, hp: 30,  mass: 1,  speedMin: 0.8, speedMax: 1.3, wallDmg: 50,  drop: 1 },
-  brute:   { r: 36, hp: 120, shield: 30, mass: 4, speed: 1.4,      wallDmg: 150, drop: 4 },
-  eater:   { r: 15, hp: 40,  mass: 0.8, speed: 90,                 wallDmg: 50,  drop: 2 },
-  crystal: { r: 46, hp: 280, shield: 90, mass: 12, speed: 40, dmg: 24, atkCd: 1.4, wallDmg: 250, drop: 10 },
-};
-
-// 정수 포식자와 진화형(결정 포식수)
-const EAT = {
-  evolveAt: 5,          // 정수를 이만큼 먹으면 진화한다
-  evolveTime: 1.5,      // 진화하는 동안 웅크린 채 무방비로 멈춰 있는 시간(초)
-  shieldPerEssence: 30, // 결정 포식수가 정수 하나를 먹으면 회복하는 보호막
-  beamCd: 6,            // 빔 재사용 대기(초)
-  beamCharge: 1.5,      // 빔 차징 시간(초). 마지막 beamLock초 동안은 조준이 고정된다
-  beamLock: 0.45,
-  beamDmg: 40,          // 사령관이 맞았을 때 피해
-  beamWallRatio: 1 / 3, // 빗나가서 성벽에 닿으면 성벽 최대 체력의 1/3을 깎는다
-};
-
-const COLOR = { beast: "#10151d", essence: "#8fd8ff", shield: "#c9d6e6", blood: "#b8483e" };
-
-const showHitbox = false;    // true로 바꾸면 충돌 판정에 쓰는 원과 베기 범위가 빨간 선으로 보인다
-
-// 갑각 짐승의 묵직한 걸음 (4장)
-const STEP_FRAMES = 80;
-const STEP_MOVE = 28;
+const LAST_WAVE = 15;
+const FIRST_BREAK = 12;     // 1웨이브 전 전열 정비 시간(초)
+const BREAK_TIME = 8;       // 웨이브 사이 숨 고르기(초)
+const PREP_TIME = 30;       // 5·10웨이브 뒤 정비 시간(초). 상점이 열린다
+const START_ESSENCE = 30;   // 처음 가진 정수
+const EATER_FROM_WAVE = 6;  // 정수 포식자는 이 웨이브부터 나온다
 
 const WAVE_TITLES = [
   "굶주린 무리가 협곡을 내려온다", "발 빠른 것들이 섞여 있다", "바람에 산성 냄새가 실려 온다",
@@ -112,29 +87,127 @@ const WAVE_TITLES = [
   "버림받은 것들의 마지막 돌격", "대지가 왕의 발걸음에 떨린다", "괴수왕",
 ];
 
+// 괴수 종류별 값
+// r = 몸 반지름, hp = 체력, mass = 무게(무거울수록 덜 밀린다), wallDmg = 성벽에 닿으면 깎는 체력, xp = 경험치
+// shield = 보호막. 남아 있는 동안 원거리 공격(병사)에 면역이고, 근접 공격은 보호막부터 깎는다
+// 굶주린 무리와 갑각 짐승의 speed는 "한 프레임에 내려가는 픽셀", 정수 포식자 계열은 "1초에 움직이는 픽셀"
+const MONSTER_TYPES = {
+  grunt:   { r: 16, hp: 30,  mass: 1,  speedMin: 0.8, speedMax: 1.3, wallDmg: 50,  drop: 1, xp: 1 },
+  brute:   { r: 36, hp: 120, shield: 30, mass: 4, speed: 1.4,      wallDmg: 150, drop: 4, xp: 5 },
+  eater:   { r: 15, hp: 40,  mass: 0.8, speed: 90,                 wallDmg: 50,  drop: 2, xp: 3 },
+  crystal: { r: 46, hp: 280, shield: 90, mass: 12, speed: 40, dmg: 24, atkCd: 1.4, wallDmg: 250, drop: 10, xp: 20 },
+};
+
+// 정수 포식자와 진화형(결정 포식수)
+const EAT = {
+  evolveAt: 5,          // 정수를 이만큼 먹으면 진화한다
+  evolveTime: 1.5,      // 진화하는 동안 웅크린 채 무방비로 멈춰 있는 시간(초)
+  shieldPerEssence: 30, // 결정 포식수가 정수 하나를 먹으면 회복하는 보호막
+  beamCd: 6, beamCharge: 1.5, beamLock: 0.45,
+  beamDmg: 40,          // 사령관이 맞았을 때 피해
+  beamWallRatio: 1 / 3, // 빗나가서 성벽에 닿으면 성벽 최대 체력의 1/3
+};
+
+// 갑각 짐승의 묵직한 걸음 (4장)
+const STEP_FRAMES = 80;
+const STEP_MOVE = 28;
+
+// =====================================================
+// 병사 (이번 주) — 성벽 위 빈자리에 정수를 내고 배치한다. 같은 자리를 다시 누르면 강화 (최대 3단계)
+// 병사의 공격은 원거리라 보호막이 있는 괴수에게는 막힌다
+// =====================================================
+const SOLDIERS = {
+  archer:   { name: "궁수", cost: 15, range: 430, dmg: 9,  cd: 0.8, speed: 760, pierce: 1 },  // 빠르게 쏘는 한 발
+  ballista: { name: "노포", cost: 35, range: 540, dmg: 32, cd: 2.3, speed: 980, pierce: 4 },  // 느리지만 강하고 4마리 관통
+};
+const SLOT_X = [138, 234, 330, 426, 522, 618];  // 흉벽 톱니 사이 빈자리
+const SLOT_UNLOCK_ORDER = [2, 3, 1, 4, 0, 5];   // 가운데 자리부터 열린다
+const START_SLOTS = 2;                          // 처음 열려 있는 자리 수
+
+// 정비 시간 상점
+const SHOP = [
+  { name: "성벽 수리", desc: "성벽 +250", cost: () => 20,
+    can: () => wallHp < WALL_MAX, buy: () => { wallHp = Math.min(WALL_MAX, wallHp + 250); } },
+  { name: "사령관 회복", desc: "체력 전부 회복", cost: () => 10,
+    can: () => player.downed <= 0 && player.hp < player.maxHp, buy: () => { player.hp = player.maxHp; } },
+  { name: "병사 훈련", desc: "병사 피해 +20%", cost: () => 35 + trainCount * 15,
+    can: () => true, buy: () => { soldierDmgMul *= 1.2; trainCount++; } },
+  { name: "자리 확장", desc: "병사 자리 +1", cost: () => 40,
+    can: () => !!nextLockedSlot(), buy: () => { nextLockedSlot().unlocked = true; } },
+];
+
+// =====================================================
+// 스킬과 레벨업 특전 (이번 주) — 괴수를 쓰러뜨려 경험치를 모으면 레벨업, 특전 셋 중 하나를 고른다
+// =====================================================
+const SKILLS = {
+  harvest: { name: "수확",   cd: 5, dmg: 30, radius: 170, desc: "괴수 하나를 크게 벤다. 이 스킬로 처치하면 피해 +4" },
+  roar:    { name: "포효",   cd: 4, dmg: 25, radius: 210, desc: "파동으로 피해를 주고 맞은 적을 둔화시킨다" },
+  frenzy:  { name: "광폭화", cd: 5, duration: 5,          desc: "5초간 기본 공격의 피해, 속도, 범위 +15%" },
+};
+function hasSkill(p, id) { return p.skills.some(sk => sk && sk.id === id); }
+function freeSlot(p) { return p.skills.indexOf(null); }
+function hasAnySkill(p) { return p.skills.some(Boolean); }
+
+// available이 있는 특전은 조건을 만족할 때만 선택지에 나온다
+const PERKS = [
+  { name: "중검식", desc: "기본 공격 피해 +15%", apply: p => { p.atkDmg *= 1.15; } },
+  { name: "쾌검식", desc: "기본 공격 속도 +15%", apply: p => { p.atkCd /= 1.15; } },
+  { name: "유검식", desc: "기본 공격 범위와 각도 증가", apply: p => { p.atkRange *= 1.12; p.atkHalf = Math.min(p.atkHalf + 0.12, 1.6); } },
+  { name: "스킬 숙련", desc: "모든 스킬 재사용 대기 -15%", available: hasAnySkill, apply: p => { p.skillCdMul *= 0.85; } },
+  { name: "스킬 위력", desc: "모든 스킬 피해 +20%", available: hasAnySkill, apply: p => { p.skillDmgMul *= 1.2; } },
+  { name: "질풍", desc: "이동 속도 +12%", apply: p => { p.speed *= 1.12; } },
+  { name: "강철 피부", desc: "최대 체력 +25, 체력 전부 회복", apply: p => { p.maxHp += 25; p.hp = p.maxHp; } },
+  { name: "포식자의 피", desc: "괴수를 쓰러뜨릴 때마다 체력 2 회복", apply: p => { p.healOnKill += 2; } },
+  { name: "수집가", desc: "정수 끌어당기는 범위 +40%", apply: p => { p.magnet *= 1.4; } },
+  { name: "돌파", desc: "대시 재사용 -25%", apply: p => { p.dashCd *= 0.75; } },
+];
+for (const id of Object.keys(SKILLS)) {   // 스킬 습득도 특전 중 하나로 나온다 (빈 슬롯이 있을 때만)
+  PERKS.push({
+    name: `스킬 습득: ${SKILLS[id].name}`, desc: SKILLS[id].desc, skill: true,
+    available: p => freeSlot(p) >= 0 && !hasSkill(p, id),
+    apply: p => { p.skills[freeSlot(p)] = { id, timer: 0 }; },
+  });
+}
+
+const COLOR = { beast: "#10151d", essence: "#8fd8ff", shield: "#c9d6e6", blood: "#b8483e", gold: "#d4a03a", ink: "#e9e4d6" };
+const FONT = '"Gowun Batang", serif';
+
+const showHitbox = false;    // true로 바꾸면 충돌 판정에 쓰는 원과 베기 범위가 빨간 선으로 보인다
+
 // =====================================================
 // 게임 상태 (계속 바뀌는 값들). 처음 값은 resetGame()에서 넣는다
+// gameState: "break"(휴식) / "prep"(정비 시간) / "playing"(웨이브 진행) / "levelup"(특전 고르기)
+//            / "gameover"(성벽 붕괴) / "victory"(15웨이브 돌파)
 // =====================================================
-let gameState = "playing";   // "playing"(플레이 중) 또는 "gameover"(게임 오버)
+let gameState = "break";
+let resumeState = "playing";  // 특전을 고른 뒤 돌아갈 상태
 
-let player;                  // 사령관: { x, y, aim, hp, downed, atkTimer, dashTimer, dashTime, dashX, dashY, invuln, flash }
-let monsters = [];           // 괴수들: { type, x, y, r, mass, speed, hp, maxHp, kvx, kvy, flash }
-let pickups = [];            // 바닥에 떨어진 정수들: { x, y, vx, vy, t, life }
-let effects = [];            // 베기 궤적, 대시 잔상 같은 연출
+let player;                   // 사령관 (위치, 체력, 특전으로 바뀐 능력치, 스킬 슬롯)
+let monsters = [];            // 괴수들
+let pickups = [];             // 바닥에 떨어진 정수들
+let projectiles = [];         // 병사가 쏜 화살과 노포
+let effects = [];             // 베기 궤적, 대시 잔상, 떠오르는 글자 같은 연출
+let slots = [];               // 성벽 위 병사 자리: { x, unlocked, soldier }
 
-let wallHp;                  // 성벽 체력. 0이 되면 게임 오버
+let wallHp;
 const WALL_MAX = 1000;
-let essenceCount;            // 모은 정수
-let kills;                   // 처치한 괴수 수 = 점수
-let wave;                    // 지금 웨이브
+let essenceCount;             // 모은 정수
+let kills;                    // 처치한 괴수 수 = 점수
+let wave;                     // 지금(또는 다음) 웨이브
+let waveQueue = [];           // 이번 웨이브에 남은 등장 예정 괴수: { type, t, x }
+let waveTime = 0;             // 이번 웨이브가 시작된 뒤 흐른 시간(초)
+let breakTimer = 0;           // 휴식이 끝나기까지 남은 시간(초)
+let banner = null;            // 화면 위에 잠깐 뜨는 웨이브 제목
 
-let startTime;               // 게임을 시작한 시각 (Date.now)
-let lastSpawn;               // 마지막으로 괴수를 내보낸 시각
-let survived = 0;            // 버틴 시간(초)
+let level, xp, xpNext, pendingLevelUps;  // 레벨과 경험치
+let perkChoices = null;                  // 지금 고를 수 있는 특전 셋
+let selectedSoldier = "archer";          // 휴식 중 배치할 병사 종류
+let soldierDmgMul, trainCount;           // 병사 훈련 상태
 
-let frame = 0;               // 지나간 프레임 수 (갑각 짐승 걸음용)
-let shake = 0;               // 화면 흔들림 세기
-let hitstop = 0;             // 0보다 크면 그 시간 동안 화면이 멈춘다 (타격감)
+let startTime, survived = 0;  // 버틴 시간(초)
+let frame = 0;                // 지나간 프레임 수 (갑각 짐승 걸음용)
+let shake = 0;                // 화면 흔들림 세기
+let hitstop = 0;              // 0보다 크면 그 시간 동안 화면이 멈춘다 (타격감)
 
 // 햇빛 속을 천천히 떠다니는 먼지 (장식이라 재시작해도 그대로 둔다)
 let dust = [];
@@ -147,81 +220,114 @@ for (let i = 0; i < 30; i++) {
 // =====================================================
 function resetGame() {
   player = {
-    x: W / 2, y: WALL_Y - 140, aim: -Math.PI / 2,
-    atkTimer: 0, dashTimer: 0, dashTime: 0, dashX: 0, dashY: -1, invuln: 0,
-    hp: PLAYER.maxHp, downed: 0, flash: 0,
+    x: W / 2, y: WALL_Y - 140, aim: -Math.PI / 2, r: PLAYER.r,
+    speed: PLAYER.speed, atkDmg: PLAYER.atkDmg, atkRange: PLAYER.atkRange, atkHalf: PLAYER.atkHalf,
+    atkCd: PLAYER.atkCd, dashCd: PLAYER.dashCd, magnet: PLAYER.magnet,
+    hp: PLAYER.maxHp, maxHp: PLAYER.maxHp, healOnKill: 0,
+    skills: [null, null], skillCdMul: 1, skillDmgMul: 1, harvestBonus: 0, frenzy: 0,
+    atkTimer: 0, dashTimer: 0, dashTime: 0, dashX: 0, dashY: -1, invuln: 0, downed: 0, flash: 0,
   };
-  wave = 1;                        // 괴수를 만들 때 웨이브를 쓰므로 먼저 되돌린다
   monsters = [];
-  for (let i = 0; i < START_MONSTERS; i++) {
-    spawnMonster(100 + i * 110);   // 처음 괴수들은 서로 다른 높이에서 출발
-  }
   pickups = [];
+  projectiles = [];
   effects = [];
+  slots = SLOT_X.map(x => ({ x: x, unlocked: false, soldier: null }));
+  for (let i = 0; i < START_SLOTS; i++) slots[SLOT_UNLOCK_ORDER[i]].unlocked = true;
+
   wallHp = WALL_MAX;
-  essenceCount = 0;
+  essenceCount = START_ESSENCE;
   kills = 0;
-  startTime = Date.now();          // 빠뜨리면 재시작해도 시간이 이어진다
-  lastSpawn = Date.now();
+  wave = 0;
+  waveQueue = [];
+  level = 1; xp = 0; xpNext = 12; pendingLevelUps = 0; perkChoices = null;
+  selectedSoldier = "archer";
+  soldierDmgMul = 1; trainCount = 0;
+  startTime = Date.now();
   survived = 0;
-  shake = 0;
-  hitstop = 0;
-  dashRequested = false;
-  gameState = "playing";
+  shake = 0; hitstop = 0;
+  dashRequested = false; skillRequested = [false, false];
+
+  gameState = "break";
+  breakTimer = FIRST_BREAK;
+  banner = { title: "전열을 갖춰라", text: "성벽 위 빈자리를 눌러 병사를 배치한다", t: 0, dur: 3.5 };
 }
 
-// 괴수 하나를 화면 위쪽의 랜덤한 x 위치에 만든다
-function spawnMonster(startY = -40) {   // startY: 처음 나타나는 높이. 기본은 화면 위쪽 바깥
-  const roll = Math.random();
-  let type = "grunt";
-  if (wave >= EATER_FROM_WAVE && roll < EATER_CHANCE) type = "eater";
-  else if (roll < EATER_CHANCE + BRUTE_CHANCE) type = "brute";
+// =====================================================
+// 웨이브 구성: 웨이브마다 "예산"만큼 괴수를 무리 지어 내보낸다
+// =====================================================
+function buildWave(n) {
+  const queue = [];
+  let budget = Math.round(12 + n * 6);
+  const duration = 22 + n * 1.5;
+  const pool = [{ type: "grunt", cost: 1, w: 5 }];
+  if (n >= 2) pool.push({ type: "brute", cost: 4, w: 1 + n * 0.1 });
+  if (n >= EATER_FROM_WAVE) pool.push({ type: "eater", cost: 3, w: 0.9 });
+  const totalW = pool.reduce((s, p) => s + p.w, 0);
+
+  let t = 1.5;
+  while (budget > 0) {
+    const groupSize = Math.floor(rand(2, 6));
+    const gx = rand(FIELD.left + 60, FIELD.right - 60);
+    for (let i = 0; i < groupSize && budget > 0; i++) {
+      let r = Math.random() * totalW, choice = pool[0];
+      for (const p of pool) { r -= p.w; if (r <= 0) { choice = p; break; } }
+      budget -= choice.cost;
+      queue.push({ type: choice.type, t: t + i * 0.25, x: clamp(gx + rand(-50, 50), FIELD.left + 20, FIELD.right - 20) });
+    }
+    t += rand(0.6, 1.4) * duration * 4 / (12 + n * 6);
+  }
+  return queue.sort((a, b) => a.t - b.t);
+}
+
+function startNextWave() {
+  wave = wave + 1;
+  waveQueue = buildWave(wave);
+  waveTime = 0;
+  gameState = "playing";
+  banner = { title: wave === LAST_WAVE ? "최후의 웨이브" : `웨이브 ${wave}`, text: WAVE_TITLES[wave - 1], t: 0, dur: 2.8 };
+}
+
+function spawnMonster(type, x, y) {
   const t = MONSTER_TYPES[type];
-  const waveBoost = 1 + (wave - 1) * 0.08;   // 웨이브가 오를수록 조금씩 빨라진다
+  const hpMul = 1 + (wave - 1) * 0.09;          // 웨이브가 오를수록 단단해진다
+  const speedMul = 1 + (wave - 1) * 0.04;       // 조금씩 빨라진다
   const speed = t.speedMin ? rand(t.speedMin, t.speedMax) : t.speed;
   monsters.push({
-    type: type,
-    x: rand(FIELD.left + 30, FIELD.right - 30),
-    y: startY,
-    r: t.r, mass: t.mass,
-    speed: speed * waveBoost,
-    hp: t.hp, maxHp: t.hp,
-    shield: t.shield || 0, maxShield: t.shield || 0,
-    kvx: 0, kvy: 0,      // 넉백(밀려나는) 속도
-    flash: 0,            // 맞은 순간 번쩍이는 시간
-    // 정수 포식자·결정 포식수 전용
+    type: type, x: x, y: y, r: t.r, mass: t.mass,
+    speed: speed * (t.speedMin || type === "brute" ? speedMul : 1),
+    hp: t.hp * hpMul, maxHp: t.hp * hpMul,
+    shield: (t.shield || 0) * hpMul, maxShield: (t.shield || 0) * hpMul,
+    kvx: 0, kvy: 0, flash: 0, slow: 0, deflectT: 0, dead: false,
     eaten: 0, evolving: 0, beamCd: EAT.beamCd, charge: 0, stagger: 0, aimX: 0, aimY: 1, atkTimer: 0,
   });
 }
 
 // =====================================================
-// 입력 (5장) — 이벤트는 "기록만" 하고, 움직이는 건 게임 루프가 한다 (방식 B)
+// 입력 — 이벤트는 "기록만" 하고, 움직이는 건 게임 루프가 한다 (5장 방식 B)
 // =====================================================
-const keys = {};               // 지금 눌려 있는 키를 적어 두는 메모장
-let dashRequested = false;     // 대시 키를 눌렀다는 기록
-let mouseDown = false;         // 마우스를 누르고 있는가 (누르고 있으면 계속 벤다)
+const keys = {};
+let dashRequested = false;
+let skillRequested = [false, false];
+let mouseDown = false;
 let mouseX = 400, mouseY = 400;
+let buttons = [];     // 이번 프레임에 그려진 버튼들 (클릭 판정용)
 
 document.addEventListener("keydown", function (e) {
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
-    e.preventDefault();   // 방향키와 스페이스바로 페이지가 스크롤되지 않게
-  }
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
   keys[e.key] = true;
+  if (e.repeat) return;
+  if (e.key === " " || e.key === "Shift") dashRequested = true;
+  if (e.key === "q" || e.key === "Q") skillRequested[0] = true;
+  if (e.key === "e" || e.key === "E") skillRequested[1] = true;
 
-  // 대시: 스페이스바 또는 Shift. 꾹 누를 때 반복되는 이벤트는 무시한다
-  if ((e.key === " " || e.key === "Shift") && !e.repeat) dashRequested = true;
+  // 특전 고르기: 1, 2, 3 키로도 고를 수 있다
+  if (gameState === "levelup" && ["1", "2", "3"].includes(e.key)) choosePerk(perkChoices[Number(e.key) - 1]);
 
-  // 게임 오버 상태에서 R 키를 누르면 다시 시작 (대문자 R도 받는다)
-  if (gameState === "gameover" && (e.key === "r" || e.key === "R")) {
-    resetGame();
-  }
+  // 게임이 끝났으면 R 키로 다시 시작
+  if ((gameState === "gameover" || gameState === "victory") && (e.key === "r" || e.key === "R")) resetGame();
 });
+document.addEventListener("keyup", function (e) { keys[e.key] = false; });
 
-document.addEventListener("keyup", function (e) {
-  keys[e.key] = false;
-});
-
-// 마우스 좌표를 캔버스 기준 좌표로 바꾼다 (캔버스가 화면에 맞게 줄어 있어서 비율도 곱한다)
 function toCanvasPos(e) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -229,20 +335,25 @@ function toCanvasPos(e) {
     y: (e.clientY - rect.top) * (canvas.height / rect.height),
   };
 }
-
 canvas.addEventListener("mousemove", function (e) {
   const pos = toCanvasPos(e);
-  mouseX = pos.x;
-  mouseY = pos.y;
+  mouseX = pos.x; mouseY = pos.y;
 });
 canvas.addEventListener("mousedown", function (e) {
   const pos = toCanvasPos(e);
-  mouseX = pos.x;
-  mouseY = pos.y;
+  mouseX = pos.x; mouseY = pos.y;
+  // 버튼 위를 눌렀으면 버튼만 누르고 베지 않는다
+  for (let i = buttons.length - 1; i >= 0; i--) {
+    const b = buttons[i];
+    if (pos.x >= b.x && pos.x <= b.x + b.w && pos.y >= b.y && pos.y <= b.y + b.h) {
+      if (b.enabled !== false) b.onClick();
+      return;
+    }
+  }
   mouseDown = true;
 });
 window.addEventListener("mouseup", function () { mouseDown = false; });
-window.addEventListener("blur", function () {   // 창을 벗어나면 눌린 키를 모두 뗀 것으로
+window.addEventListener("blur", function () {
   for (const k in keys) keys[k] = false;
   mouseDown = false;
 });
@@ -253,7 +364,6 @@ window.addEventListener("blur", function () {   // 창을 벗어나면 눌린 �
 let lastTime = performance.now();
 
 function gameLoop(now) {
-  // 지난 프레임에서 몇 초가 흘렀는가 (너무 길면 1/30초로 자른다: 탭을 오래 떠났다 돌아와도 튀지 않게)
   const dt = Math.min((now - lastTime) / 1000, 1 / 30);
   lastTime = now;
 
@@ -263,116 +373,134 @@ function gameLoop(now) {
   frame = frame + 1;
   const step = frame % STEP_FRAMES;
 
-  // ② 계산하기 — 플레이 중일 때만. 히트스톱 중에는 잠깐 멈춘다
-  if (gameState === "playing") {
+  // ② 계산하기
+  const active = gameState === "playing" || gameState === "break" || gameState === "prep";
+  if (active) {
     if (hitstop > 0) hitstop -= dt;
     else update(dt, step);
   }
-
-  for (const d of dust) {             // 먼지는 장식이라 게임 오버 중에도 떠다닌다
-    d.y = d.y + d.speed;
-    if (d.y > WALL_Y) d.y = 0;
+  for (const d of dust) { d.y = d.y + d.speed; if (d.y > WALL_Y) d.y = 0; }
+  if (gameState !== "levelup") {
+    for (const e of effects) e.t += dt;
+    effects = effects.filter(e => e.t < e.dur);
+    if (banner) { banner.t += dt; if (banner.t > banner.dur) banner = null; }
   }
-  for (const e of effects) e.t += dt;
-  effects = effects.filter(e => e.t < e.dur);
   shake = shake * 0.85;
 
   // ③ 그리기
+  buttons = [];
   drawWorld(step);
-  drawText();
-  if (gameState === "gameover") drawGameOver();
+  drawHUD();
+  if (gameState === "break" || gameState === "prep") drawBreakPanel();
+  if (gameState === "levelup") drawLevelUp();
+  if (gameState === "gameover") drawEnd(false);
+  if (gameState === "victory") drawEnd(true);
 
-  // ④ 다음 프레임 예약. 게임 오버가 되어도 루프는 멈추지 않는다
+  // ④ 다음 프레임 예약. 게임이 끝나도 루프는 멈추지 않는다
   requestAnimationFrame(gameLoop);
 }
 
 // ---------- 계산 ----------
 function update(dt, step) {
+  survived = Math.floor((Date.now() - startTime) / 1000);
   updatePlayer(dt);
 
-  // 시간과 웨이브: 실제로 흐른 시간을 쓴다
-  survived = Math.floor((Date.now() - startTime) / 1000);
-  wave = Math.min(15, 1 + Math.floor(survived / WAVE_SECONDS));
-
-  // 새 괴수 내보내기: 웨이브가 오를수록 간격이 짧아진다
-  const spawnEvery = Math.max(SPAWN_MIN, SPAWN_START - (wave - 1) * 80);
-  if (Date.now() - lastSpawn > spawnEvery) {
-    spawnMonster();
-    lastSpawn = Date.now();
+  // 웨이브 진행: 정해진 시각이 된 괴수를 내보낸다
+  if (gameState === "playing") {
+    waveTime += dt;
+    while (waveQueue.length && waveQueue[0].t <= waveTime) {
+      const s = waveQueue.shift();
+      spawnMonster(s.type, s.x, -30);
+    }
   }
 
   // 괴수 이동
   for (const m of monsters) {
     m.flash = Math.max(0, m.flash - dt);
-    // 넉백: 맞으면 밀려났다가 점점 멈춘다
-    m.x += m.kvx * dt; m.y += m.kvy * dt;
+    m.slow = Math.max(0, m.slow - dt);
+    m.deflectT = Math.max(0, m.deflectT - dt);
+    m.x += m.kvx * dt; m.y += m.kvy * dt;          // 넉백
     const decay = Math.exp(-9 * dt);
     m.kvx *= decay; m.kvy *= decay;
-    // 정수 포식자와 결정 포식수는 자기만의 행동을 한다
     if (m.type === "eater") { updateEater(m, dt); continue; }
     if (m.type === "crystal") { updateCrystal(m, dt); continue; }
-    // 앞으로 걷기 (4장의 갑각 짐승 걸음 포함)
+    const slowMul = m.slow > 0 ? 0.55 : 1;          // 포효에 맞으면 느려진다
     if (m.type === "brute") {
-      if (step < STEP_MOVE) m.y = m.y + m.speed;
+      if (step < STEP_MOVE) m.y += m.speed * slowMul;
       if (step === STEP_MOVE && m.y > 0) shake = Math.max(shake, 6);
     } else {
-      m.y = m.y + m.speed;
+      m.y += m.speed * slowMul;
     }
   }
 
-  separate();   // 괴수끼리, 사령관과 괴수끼리 겹치지 않게 밀어낸다
+  separate();
+  updateSoldiers(dt);
+  updateProjectiles(dt);
 
-  // 괴수가 성벽에 닿으면: 성벽 체력을 깎고 그 괴수는 사라진다 (뒤에서 앞으로 반복)
-  for (let i = monsters.length - 1; i >= 0; i--) {
-    const m = monsters[i];
-    if (m.y >= WALL_Y - 10) {
+  // 괴수가 성벽에 닿으면: 성벽 체력을 깎고 그 괴수는 사라진다
+  for (const m of monsters) {
+    if (!m.dead && m.y >= WALL_Y - 10) {
       wallHp = Math.max(0, wallHp - MONSTER_TYPES[m.type].wallDmg);
       shake = Math.max(shake, 8);
-      monsters.splice(i, 1);
+      m.dead = true;
     }
   }
+  monsters = monsters.filter(m => !m.dead);
 
   updatePickups(dt);
 
-  // 성벽이 무너지면 게임 오버
-  if (wallHp <= 0) gameState = "gameover";
+  // 상태 바꾸기
+  if (wallHp <= 0) { gameState = "gameover"; return; }
+  if (gameState === "playing" && waveQueue.length === 0 && monsters.length === 0) {
+    if (wave >= LAST_WAVE) { gameState = "victory"; return; }
+    const prep = wave % 5 === 0;               // 5·10웨이브 뒤에는 정비 시간
+    gameState = prep ? "prep" : "break";
+    breakTimer = prep ? PREP_TIME : BREAK_TIME;
+    if (prep) banner = { title: "정비 시간", text: "정수로 성벽과 병력을 정비하라", t: 0, dur: 2.8 };
+  }
+  if (gameState === "break" || gameState === "prep") {
+    breakTimer -= dt;
+    if (breakTimer <= 0) startNextWave();
+  }
+  if (pendingLevelUps > 0) openLevelUp();
 }
 
-// 사령관: 이동, 대시, 베기 (개발 버전과 같은 방식)
+// ---------- 사령관 ----------
 function updatePlayer(dt) {
   const p = player;
   p.invuln = Math.max(0, p.invuln - dt);
   p.flash = Math.max(0, p.flash - dt);
 
-  // 쓰러져 있으면 아무것도 못 한다. 시간이 다 되면 성벽 앞에서 다시 일어난다
-  if (p.downed > 0) {
+  if (p.downed > 0) {   // 쓰러져 있으면 아무것도 못 한다
     p.downed -= dt;
     if (p.downed <= 0) {
       p.downed = 0; p.x = W / 2; p.y = WALL_Y - 60;
-      p.hp = Math.round(PLAYER.maxHp * 0.6); p.invuln = 1.5;
+      p.hp = Math.round(p.maxHp * 0.6); p.invuln = 1.5;
     }
-    dashRequested = false;
+    dashRequested = false; skillRequested = [false, false];
     return;
   }
+
   p.atkTimer -= dt;
   p.dashTimer -= dt;
+  for (const sk of p.skills) if (sk) sk.timer -= dt;
+  p.frenzy = Math.max(0, p.frenzy - dt);
 
-  // 이동 방향: 눌린 키로 -1, 0, 1을 만들고, 대각선이 빨라지지 않게 길이를 1로 맞춘다
+  // 이동 방향 (대각선이 빨라지지 않게 길이를 1로 맞춘다)
   const mx = (keys["d"] || keys["D"] || keys["ArrowRight"] ? 1 : 0) - (keys["a"] || keys["A"] || keys["ArrowLeft"] ? 1 : 0);
   const my = (keys["s"] || keys["S"] || keys["ArrowDown"] ? 1 : 0) - (keys["w"] || keys["W"] || keys["ArrowUp"] ? 1 : 0);
   const len = Math.hypot(mx, my) || 1;
   const moveX = mx / len, moveY = my / len;
 
-  // 조준: 사령관 가슴에서 마우스 쪽으로
   p.aim = Math.atan2(mouseY - (p.y - 22), mouseX - p.x);
 
-  // 대시: 움직이는 방향으로, 멈춰 있으면 조준 방향으로 짧고 빠르게 튀어 나간다
+  // 대시
   if (dashRequested && p.dashTimer <= 0) {
     const moving = moveX || moveY;
     p.dashX = moving ? moveX : Math.cos(p.aim);
     p.dashY = moving ? moveY : Math.sin(p.aim);
     p.dashTime = PLAYER.dashTime;
-    p.dashTimer = PLAYER.dashCd;
+    p.dashTimer = p.dashCd;
     p.invuln = Math.max(p.invuln, PLAYER.dashInvuln);
   }
   dashRequested = false;
@@ -383,43 +511,88 @@ function updatePlayer(dt) {
     p.y += p.dashY * PLAYER.dashSpeed * dt;
     if (Math.random() < 0.6) effects.push({ kind: "ghost", x: p.x, y: p.y, t: 0, dur: 0.18 });
   } else {
-    p.x += moveX * PLAYER.speed * dt;
-    p.y += moveY * PLAYER.speed * dt;
+    p.x += moveX * p.speed * dt;
+    p.y += moveY * p.speed * dt;
   }
   clampPlayer();
 
-  // 베기: 마우스를 누르고 있으면 atkCd초마다 벤다
-  if (mouseDown && p.atkTimer <= 0) {
-    slash();
-    p.atkTimer = PLAYER.atkCd;
-  }
+  // 베기와 스킬
+  if (mouseDown && p.atkTimer <= 0) { slash(); p.atkTimer = atkStats(p).cd; }
+  if (skillRequested[0]) useSkill(0);
+  if (skillRequested[1]) useSkill(1);
+  skillRequested = [false, false];
 }
 
 function clampPlayer() {
-  player.x = clamp(player.x, FIELD.left + PLAYER.r, FIELD.right - PLAYER.r);
-  player.y = clamp(player.y, 60, WALL_Y - PLAYER.r);
+  player.x = clamp(player.x, FIELD.left + player.r, FIELD.right - player.r);
+  player.y = clamp(player.y, 60, WALL_Y - player.r);
 }
 
-// 베기 판정: 부채꼴 안에 있는 괴수를 모두 벤다
-// ① 거리: 사령관과 괴수 중심 사이 거리가 (베기 거리 + 괴수 반지름) 안이고
-// ② 각도: 괴수 쪽 방향이 조준 방향에서 atkHalf 이내이면 맞는다 (몸에 붙어 있으면 각도와 상관없이 맞는다)
+// 광폭화 중에는 기본 공격의 피해, 속도, 범위가 15% 오른다
+function atkStats(p) {
+  const f = p.frenzy > 0 ? 1.15 : 1;
+  return { dmg: p.atkDmg * f, cd: p.atkCd / f, range: p.atkRange * f, half: Math.min(p.atkHalf * f, 1.7) };
+}
+
+// 베기: 부채꼴 안의 괴수를 모두 벤다 (거리 조건 + 각도 조건)
 function slash() {
-  const p = player;
+  const p = player, a = atkStats(p);
   let hit = false;
-  for (let i = monsters.length - 1; i >= 0; i--) {
-    const m = monsters[i];
+  for (const m of monsters) {
+    if (m.dead) continue;
     const d = dist(p.x, p.y, m.x, m.y);
     const ang = Math.atan2(m.y - p.y, m.x - p.x);
-    if (d <= PLAYER.atkRange + m.r && (angleDiff(ang, p.aim) <= PLAYER.atkHalf || d < m.r + PLAYER.r + 6)) {
-      damageMonster(m, i, PLAYER.atkDmg, p.x, p.y, 260);
+    if (d <= a.range + m.r && (angleDiff(ang, p.aim) <= a.half || d < m.r + p.r + 6)) {
+      damageMonster(m, a.dmg, p.x, p.y, 260);
       hit = true;
     }
   }
-  effects.push({ kind: "slash", x: p.x, y: p.y - 18, a: p.aim, r: PLAYER.atkRange, half: PLAYER.atkHalf, t: 0, dur: 0.16 });
+  effects.push({ kind: "slash", x: p.x, y: p.y - 18, a: p.aim, r: a.range, half: a.half, t: 0, dur: 0.16,
+                 color: p.frenzy > 0 ? "255, 150, 120" : "255, 244, 200" });
   if (hit) { hitstop = Math.max(hitstop, 0.045); shake = Math.max(shake, 3); }
 }
 
-// 사령관이 맞았을 때
+// 스킬 재사용 대기. 광폭화는 효과가 끝난 뒤부터 대기가 흐른다
+function skillCd(p, id) {
+  const cd = SKILLS[id].cd * p.skillCdMul;
+  return id === "frenzy" ? SKILLS.frenzy.duration + cd : cd;
+}
+
+function useSkill(i) {
+  const p = player, sk = p.skills[i];
+  if (!sk || sk.timer > 0) return;
+  const def = SKILLS[sk.id];
+
+  if (sk.id === "harvest") {
+    // 사거리 안에서 조준점에 가장 가까운 괴수 하나를 벤다
+    let target = null, best = Infinity;
+    for (const m of monsters) {
+      if (m.dead || dist(p.x, p.y, m.x, m.y) > def.radius + m.r) continue;
+      const d = dist(mouseX, mouseY, m.x, m.y - m.r);
+      if (d < best) { best = d; target = m; }
+    }
+    if (!target) return;                 // 대상이 없으면 재사용 대기를 쓰지 않는다
+    sk.timer = skillCd(p, sk.id);
+    const ang = Math.atan2(target.y - p.y, target.x - p.x);
+    effects.push({ kind: "slash", x: target.x, y: target.y - target.r, a: ang + Math.PI, r: target.r + 26, half: 1.2, t: 0, dur: 0.25, color: "212, 160, 58" });
+    damageMonster(target, (def.dmg + p.harvestBonus) * p.skillDmgMul, p.x, p.y, 320, "harvest");
+    hitstop = Math.max(hitstop, 0.06); shake = Math.max(shake, 5);
+  } else if (sk.id === "roar") {
+    sk.timer = skillCd(p, sk.id);
+    for (const m of monsters) {
+      if (m.dead || dist(p.x, p.y, m.x, m.y) > def.radius + m.r) continue;
+      m.slow = 2.5;
+      damageMonster(m, def.dmg * p.skillDmgMul, p.x, p.y, 200);
+    }
+    effects.push({ kind: "ring", x: p.x, y: p.y - 10, r0: 20, r1: def.radius, t: 0, dur: 0.4 });
+    shake = Math.max(shake, 7);
+  } else if (sk.id === "frenzy") {
+    sk.timer = skillCd(p, sk.id);
+    p.frenzy = def.duration;
+    addText(p.x, p.y - 110, "광폭화", "#ff8a6a", 1.0, 24);
+  }
+}
+
 function hurtPlayer(dmg) {
   const p = player;
   if (p.downed > 0 || p.invuln > 0) return false;
@@ -433,19 +606,19 @@ function hurtPlayer(dmg) {
   return true;
 }
 
-// 떠오르는 글자 (보호막 파괴, 진화 등)
 function addText(x, y, text, color, dur, size) {
   effects.push({ kind: "text", x, y, text: String(text), color, t: 0, dur, size });
 }
 
-// 괴수가 맞았을 때: 보호막부터 깎고, 무게에 반비례해 밀려나고, 체력이 0이 되면 쓰러진다
-// ranged = 원거리 공격인가. 지금은 사령관의 근접 베기뿐이라 항상 false지만, 병사 화살을 넣으면 true로 쓴다
-function damageMonster(m, index, dmg, fromX, fromY, force, ranged = false) {
-  if (m.shield > 0 && ranged) {           // 보호막은 원거리 공격을 튕겨 낸다
-    addText(m.x, m.y - m.r * 2 - 10, "막힘", COLOR.shield, 0.6, 16);
-    return;
+// 괴수가 맞았을 때: 보호막부터 깎고, 밀려나고, 체력이 0이 되면 쓰러진다
+// ranged = 원거리 공격(병사)인가. 보호막이 남아 있으면 원거리 공격은 막힌다 (false를 돌려준다)
+function damageMonster(m, dmg, fromX, fromY, force, source, ranged = false) {
+  if (m.dead) return true;
+  if (m.shield > 0 && ranged) {
+    if (m.deflectT <= 0) { addText(m.x, m.y - m.r * 2 - 10, "막힘", COLOR.shield, 0.6, 16); m.deflectT = 0.5; }
+    return false;
   }
-  if (m.shield > 0) {                     // 근접 공격은 보호막부터 깎고, 남는 피해가 체력으로 넘어간다
+  if (m.shield > 0) {
     const absorbed = Math.min(m.shield, dmg);
     m.shield -= absorbed;
     dmg -= absorbed;
@@ -460,22 +633,62 @@ function damageMonster(m, index, dmg, fromX, fromY, force, ranged = false) {
   const k = force / Math.sqrt(m.mass);
   m.kvx += (m.x - fromX) / d * k;
   m.kvy += (m.y - fromY) / d * k;
-  if (m.hp <= 0) {
-    // 쓰러진 자리에 정수를 흩뿌린다. 정수 포식자 계열은 먹었던 정수도 전부 돌려준다
-    const drops = MONSTER_TYPES[m.type].drop + m.eaten;
-    const sp = drops > 8 ? 220 : 140;
-    for (let n = 0; n < drops; n++) {
-      pickups.push({ x: m.x, y: m.y - 4, vx: rand(-sp, sp), vy: rand(-sp, 60), t: 0, life: 14 });
-    }
-    if (m.eaten >= 3) addText(m.x, m.y - m.r * 2 - 20, `정수 ${drops}`, COLOR.essence, 1.0, 20);
-    monsters.splice(index, 1);
-    kills = kills + 1;
+  if (m.hp <= 0) killMonster(m, source);
+  return true;
+}
+
+function killMonster(m, source) {
+  m.dead = true;
+  kills = kills + 1;
+  const p = player;
+  if (source === "harvest") { p.harvestBonus += 4; addText(p.x, p.y - 110, "수확 +4", COLOR.gold, 0.8, 20); }
+  if (p.downed <= 0 && p.healOnKill) p.hp = Math.min(p.maxHp, p.hp + p.healOnKill);
+  const drops = MONSTER_TYPES[m.type].drop + m.eaten;   // 정수 포식자 계열은 먹었던 정수도 돌려준다
+  const sp = drops > 8 ? 220 : 140;
+  for (let n = 0; n < drops; n++) {
+    pickups.push({ x: m.x, y: m.y - 4, vx: rand(-sp, sp), vy: rand(-sp, 60), t: 0, life: 14 });
+  }
+  if (m.eaten >= 3) addText(m.x, m.y - m.r * 2 - 20, `정수 ${drops}`, COLOR.essence, 1.0, 20);
+  addXp(MONSTER_TYPES[m.type].xp);
+}
+
+// ---------- 경험치와 레벨업 ----------
+function addXp(n) {
+  xp += n;
+  while (xp >= xpNext) {
+    xp -= xpNext;
+    level++;
+    xpNext = Math.round(xpNext * 1.3 + 4);
+    pendingLevelUps++;
   }
 }
 
-// 겹침 판정과 밀어내기: 두 원의 중심 거리가 반지름 합보다 작으면 겹친 것이다
+function openLevelUp() {
+  pendingLevelUps--;
+  resumeState = gameState;
+  gameState = "levelup";
+  mouseDown = false;
+  const p = player;
+  const avail = PERKS.filter(k => !k.available || k.available(p));
+  const choices = shuffle(avail).slice(0, 3);
+  // 스킬이 하나도 없으면 스킬 습득을 최소 하나 보여 준다
+  if (!hasAnySkill(p) && !choices.some(c => c.skill)) {
+    const sk = shuffle(avail.filter(c => c.skill))[0];
+    if (sk) choices[2] = sk;
+  }
+  perkChoices = choices;
+}
+
+function choosePerk(perk) {
+  if (!perk) return;
+  perk.apply(player);
+  addText(player.x, player.y - 120, perk.name, COLOR.gold, 1.2, 22);
+  perkChoices = null;
+  gameState = resumeState;
+}
+
+// ---------- 겹침 판정과 밀어내기 (원: 중심 거리 < 반지름 합) ----------
 function separate() {
-  // 괴수끼리: 겹친 만큼 서로 밀어낸다. 무거운 쪽이 덜 밀린다
   for (let i = 0; i < monsters.length; i++) {
     const a = monsters[i];
     for (let j = i + 1; j < monsters.length; j++) {
@@ -483,7 +696,7 @@ function separate() {
       let dx = b.x - a.x, dy = b.y - a.y;
       const minD = a.r + b.r;
       const d2 = dx * dx + dy * dy;
-      if (d2 >= minD * minD) continue;   // 안 겹쳤으면 넘어간다
+      if (d2 >= minD * minD) continue;
       let d = Math.sqrt(d2);
       if (d < 0.01) { dx = rand(-1, 1); dy = rand(-1, 1); d = Math.hypot(dx, dy); }
       const push = (minD - d) * 0.5;
@@ -492,12 +705,11 @@ function separate() {
       b.x += nx * push * (a.mass / total); b.y += ny * push * (a.mass / total);
     }
   }
-  // 사령관과 괴수: 사령관은 괴수에게 막힌다. 대시 중에는 통과한다
   const p = player;
-  if (p.dashTime <= 0 && p.downed <= 0) {
-    const pm = 2;   // 사령관의 무게
+  if (p.dashTime <= 0 && p.downed <= 0) {   // 사령관은 괴수에게 막힌다. 대시 중에는 통과
+    const pm = 2;
     for (const m of monsters) {
-      const dx = p.x - m.x, dy = p.y - m.y, minD = PLAYER.r + m.r;
+      const dx = p.x - m.x, dy = p.y - m.y, minD = p.r + m.r;
       const d = Math.hypot(dx, dy);
       if (d >= minD || d < 0.01) continue;
       const push = (minD - d) * 0.8, total = pm + m.mass;
@@ -506,20 +718,108 @@ function separate() {
     }
     clampPlayer();
   }
-  // 괴수도 절벽 밖으로 밀려나지 않게
   for (const m of monsters) {
     m.x = clamp(m.x, FIELD.left + m.r * 0.6, FIELD.right - m.r * 0.6);
     m.y = clamp(m.y, -120, WALL_Y - 6);
   }
 }
 
+// ---------- 병사와 화살 ----------
+function updateSoldiers(dt) {
+  for (const slot of slots) {
+    const s = slot.soldier;
+    if (!s) continue;
+    s.recoil = Math.max(0, s.recoil - dt);
+    const def = SOLDIERS[s.type];
+    s.timer -= dt;
+    if (s.timer > 0) continue;
+    const sx = slot.x, sy = WALL_Y + 8;
+    let target = null;
+    for (const m of monsters) {                    // 사거리 안에서 성벽에 가장 가까운 괴수
+      if (m.dead || m.y < 0 || dist(sx, sy, m.x, m.y) > def.range) continue;
+      if (!target || m.y > target.y) target = m;
+    }
+    if (!target) continue;
+    const tx = target.x, ty = target.y - target.r;
+    const d = dist(sx, sy, tx, ty) || 1;
+    projectiles.push({
+      kind: s.type, x: sx, y: sy, vx: (tx - sx) / d * def.speed, vy: (ty - sy) / d * def.speed,
+      dmg: def.dmg * (1 + 0.45 * (s.level - 1)) * soldierDmgMul, r: 6,
+      life: def.range / def.speed + 0.1, pierce: def.pierce, hit: new Set(),
+    });
+    s.timer = def.cd * Math.pow(0.9, s.level - 1);   // 강화할수록 빨리 쏜다
+    s.recoil = 0.12;
+  }
+}
+
+function updateProjectiles(dt) {
+  for (const pr of projectiles) {
+    pr.x += pr.vx * dt; pr.y += pr.vy * dt; pr.life -= dt;
+    for (const m of monsters) {
+      if (m.dead || pr.hit.has(m)) continue;
+      if (dist(pr.x, pr.y, m.x, m.y - m.r) < m.r + pr.r) {
+        pr.hit.add(m);
+        const ok = damageMonster(m, pr.dmg, pr.x - pr.vx * 0.05, pr.y - pr.vy * 0.05, pr.kind === "ballista" ? 220 : 60, null, true);
+        if (!ok) { pr.life = 0; break; }            // 보호막에 막혔다
+        pr.pierce--;
+        if (pr.pierce <= 0) { pr.life = 0; break; }
+      }
+    }
+  }
+  projectiles = projectiles.filter(pr => pr.life > 0 && pr.y > -200);
+}
+
+// ---------- 휴식 중 병사 배치와 상점 ----------
+function nextLockedSlot() { return SLOT_UNLOCK_ORDER.map(i => slots[i]).find(s => !s.unlocked); }
+function upgradeCost(s) { return Math.round(SOLDIERS[s.type].cost * 0.9 * s.level); }
+
+function clickSlot(slot) {
+  if (!slot.unlocked) return;
+  if (!slot.soldier) {
+    const def = SOLDIERS[selectedSoldier];
+    if (essenceCount < def.cost) return notEnough();
+    essenceCount -= def.cost;
+    slot.soldier = { type: selectedSoldier, level: 1, timer: 0, recoil: 0 };
+  } else if (slot.soldier.level < 3) {
+    const cost = upgradeCost(slot.soldier);
+    if (essenceCount < cost) return notEnough();
+    essenceCount -= cost;
+    slot.soldier.level++;
+    addText(slot.x, WALL_Y - 30, "강화", COLOR.gold, 0.9, 20);
+  }
+}
+function notEnough() { addText(W / 2, WALL_Y - 60, "정수가 부족하다", COLOR.blood, 1.0, 20); }
+
+// ---------- 정수 ----------
+function updatePickups(dt) {
+  const p = player;
+  for (const k of pickups) {
+    k.t += dt;
+    const fr = Math.exp(-5 * dt);
+    k.vx *= fr; k.vy *= fr;
+    const d = dist(k.x, k.y, p.x, p.y);
+    const nearWall = k.y > WALL_Y - 150;
+    if (p.downed <= 0 && d < p.magnet && k.t > 0.25) {
+      const sp = 380 + (p.magnet - d) * 6;
+      k.vx = (p.x - k.x) / (d || 1) * sp; k.vy = (p.y - 10 - k.y) / (d || 1) * sp;
+      if (d < 24) k.collected = true;
+    } else if (nearWall && k.t > 0.4) {           // 성벽 근처 정수는 저절로 회수된다
+      k.vy = 420; k.vx *= 0.5;
+      if (k.y > WALL_Y + 20) k.collected = true;
+    }
+    k.x += k.vx * dt; k.y += k.vy * dt;
+    if (k.collected) essenceCount = essenceCount + 1;
+  }
+  pickups = pickups.filter(k => !k.collected && !k.eaten && k.t < k.life);
+}
+
 /* ---------- 정수 포식자 ----------
    사령관과 성벽을 무시하고 전장의 정수를 쫓아가 먹는다. 먹을수록 커지고 단단해진다.
-   EAT.evolveAt개를 먹으면 잠시 웅크렸다가 결정 포식수로 진화한다 (화면에 한 마리까지). */
+   EAT.evolveAt개를 먹으면 잠시 웅크렸다가 결정 포식수로 진화한다 (화면에 한 마리까지) */
 function nearestEssence(m, maxDist) {
   let best = null, bestD = maxDist;
   for (const k of pickups) {
-    if (k.eaten || k.collected || k.t < 0.3 || k.y > WALL_Y - 150) continue; // 성벽 근처 정수는 노리지 않는다
+    if (k.eaten || k.collected || k.t < 0.3 || k.y > WALL_Y - 150) continue;
     const d = dist(m.x, m.y, k.x, k.y);
     if (d < bestD) { bestD = d; best = k; }
   }
@@ -533,23 +833,21 @@ function moveToward(m, tx, ty, speed, dt) {
 }
 
 function updateEater(m, dt) {
-  if (m.evolving > 0) {                 // 진화 중: 움직이지 않는다
+  if (m.evolving > 0) {
     m.evolving -= dt;
     if (m.evolving <= 0) evolve(m);
     return;
   }
+  const slowMul = m.slow > 0 ? 0.55 : 1;
   const k = nearestEssence(m, 2000);
-  if (!k) {                             // 먹을 정수가 없으면 성벽으로 내려간다
-    m.y += m.speed * 0.5 * dt;
-    return;
-  }
-  moveToward(m, k.x, k.y, m.speed, dt);
+  if (!k) { m.y += m.speed * 0.5 * slowMul * dt; return; }   // 먹을 정수가 없으면 성벽으로
+  moveToward(m, k.x, k.y, m.speed * slowMul, dt);
   if (dist(m.x, m.y, k.x, k.y) < m.r + 10) {
     k.eaten = true;
     m.eaten++;
-    m.r += 1;                           // 먹을수록 커지고 단단해진다
+    m.r += 1;
     m.hp += 6; m.maxHp += 6;
-    const crystalAlive = monsters.some(o => o !== m && (o.type === "crystal" || o.evolving > 0));
+    const crystalAlive = monsters.some(o => o !== m && !o.dead && (o.type === "crystal" || o.evolving > 0));
     if (m.eaten >= EAT.evolveAt && !crystalAlive) {
       m.evolving = EAT.evolveTime;
       addText(m.x, m.y - m.r * 2 - 10, "진화한다!", COLOR.essence, 1.2, 22);
@@ -559,32 +857,31 @@ function updateEater(m, dt) {
 
 function evolve(m) {
   const t = MONSTER_TYPES.crystal;
+  const hpMul = 1 + (wave - 1) * 0.09;
   m.type = "crystal";
   m.r = t.r; m.mass = t.mass; m.speed = t.speed;
-  m.hp = m.maxHp = t.hp;
-  m.shield = m.maxShield = t.shield;
-  m.beamCd = 2.5;                       // 진화 직후엔 조금 빨리 첫 빔을 준비한다
+  m.hp = m.maxHp = t.hp * hpMul;
+  m.shield = m.maxShield = t.shield * hpMul;
+  m.beamCd = 2.5;
   addText(m.x, m.y - m.r * 2 - 20, "결정 포식수", COLOR.essence, 1.6, 26);
   shake = Math.max(shake, 8);
 }
 
 /* ---------- 결정 포식수 ----------
-   보호막이 깨지면 근처 정수를 먹으러 가서 보호막을 회복한다.
-   보호막이 있을 때만 EAT.beamCd초마다 사령관을 향해 빔을 차징한다. 차징 중 보호막이 깨지면 빔이 취소된다.
-   그 밖에는 성벽으로 걸어가고, 사령관이 붙어 있으면 근접 공격을 한다. */
+   보호막이 깨지면 근처 정수를 먹어 회복한다. 보호막이 있을 때만 사령관을 노리는 빔을 차징하고,
+   차징 중 보호막이 깨지면 빔이 취소된다. 그 밖에는 성벽으로 걸어가며 붙은 사령관을 공격한다 */
 function updateCrystal(m, dt) {
   const p = player;
   if (m.stagger > 0) { m.stagger -= dt; return; }
 
-  // 차징 중
   if (m.charge > 0) {
-    if (m.shield <= 0) {                // 보호막이 깨지면 빔 취소
+    if (m.shield <= 0) {
       m.charge = 0; m.stagger = 0.8; m.beamCd = EAT.beamCd;
       addText(m.x, m.y - m.r * 2 - 20, "빔 차단", COLOR.essence, 1.0, 22);
       return;
     }
     m.charge -= dt;
-    if (m.charge > EAT.beamLock && p.downed <= 0) {   // 마지막 순간 전까지는 사령관을 따라 조준
+    if (m.charge > EAT.beamLock && p.downed <= 0) {
       const d = dist(m.x, m.y - m.r, p.x, p.y - 30) || 1;
       m.aimX = (p.x - m.x) / d; m.aimY = (p.y - 30 - (m.y - m.r)) / d;
     }
@@ -592,7 +889,6 @@ function updateCrystal(m, dt) {
     return;
   }
 
-  // 보호막이 깨졌으면 근처 정수를 먹으러 간다
   if (m.shield < m.maxShield) {
     const k = nearestEssence(m, 260);
     if (k) {
@@ -607,7 +903,6 @@ function updateCrystal(m, dt) {
     }
   }
 
-  // 빔: 보호막이 있을 때만 차징을 시작한다
   m.beamCd -= dt;
   if (m.beamCd <= 0 && m.shield > 0 && p.downed <= 0 && m.y > 60) {
     m.charge = EAT.beamCharge;
@@ -615,28 +910,25 @@ function updateCrystal(m, dt) {
     return;
   }
 
-  // 근접 공격: 사령관이 몸에 붙어 있으면
   m.atkTimer -= dt;
-  if (p.downed <= 0 && dist(m.x, m.y, p.x, p.y) <= m.r + PLAYER.r + 6) {
+  if (p.downed <= 0 && dist(m.x, m.y, p.x, p.y) <= m.r + p.r + 6) {
     if (m.atkTimer <= 0) { hurtPlayer(MONSTER_TYPES.crystal.dmg); m.atkTimer = MONSTER_TYPES.crystal.atkCd; }
     return;
   }
-  m.y += m.speed * dt;                  // 그 밖에는 성벽으로 걸어간다
+  m.y += m.speed * (m.slow > 0 ? 0.55 : 1) * dt;
 }
 
 function fireBeam(m) {
   const p = player;
   const sx = m.x, sy = m.y - m.r;
   let ex, ey;
-  // 사령관에게 맞는지: 빔 직선과 사령관 사이의 거리로 판정 (대시 무적이면 통과한다)
   const px = p.x - sx, py = (p.y - 30) - sy;
   const along = px * m.aimX + py * m.aimY;            // 빔 방향으로 얼마나 앞에 있는가
   const side = Math.abs(px * m.aimY - py * m.aimX);   // 빔 직선에서 옆으로 얼마나 떨어져 있는가
-  if (p.downed <= 0 && p.invuln <= 0 && along > 0 && side < PLAYER.r + 14) {
+  if (p.downed <= 0 && p.invuln <= 0 && along > 0 && side < p.r + 14) {
     ex = sx + m.aimX * along; ey = sy + m.aimY * along;
     hurtPlayer(EAT.beamDmg);
   } else {
-    // 빗나갔으면 빔이 계속 날아간다. 성벽 높이에 닿으면 성벽에 큰 피해
     const tWall = m.aimY > 0 ? (WALL_Y - sy) / m.aimY : Infinity;
     const wx = sx + m.aimX * tWall;
     if (tWall < Infinity && wx > 0 && wx < W) {
@@ -653,29 +945,6 @@ function fireBeam(m) {
   hitstop = Math.max(hitstop, 0.06);
 }
 
-// 정수: 흩어졌다가 멈추고, 사령관이 가까이 오면 끌려와서 주워진다. 성벽 근처 정수는 저절로 회수된다
-function updatePickups(dt) {
-  const p = player;
-  for (const k of pickups) {
-    k.t += dt;
-    const fr = Math.exp(-5 * dt);
-    k.vx *= fr; k.vy *= fr;
-    const d = dist(k.x, k.y, p.x, p.y);
-    const nearWall = k.y > WALL_Y - 150;
-    if (p.downed <= 0 && d < PLAYER.magnet && k.t > 0.25) {
-      const sp = 380 + (PLAYER.magnet - d) * 6;
-      k.vx = (p.x - k.x) / (d || 1) * sp; k.vy = (p.y - 10 - k.y) / (d || 1) * sp;
-      if (d < 24) k.collected = true;
-    } else if (nearWall && k.t > 0.4) {
-      k.vy = 420; k.vx *= 0.5;
-      if (k.y > WALL_Y + 20) k.collected = true;
-    }
-    k.x += k.vx * dt; k.y += k.vy * dt;
-    if (k.collected) essenceCount = essenceCount + 1;
-  }
-  pickups = pickups.filter(k => !k.collected && !k.eaten && k.t < k.life);   // 주웠거나, 먹혔거나, 14초가 지난 정수는 사라진다
-}
-
 // =====================================================
 // 그리기
 // =====================================================
@@ -683,14 +952,10 @@ function drawSprite(name, x, y) {
   ctx.drawImage(images[name], x - FOOT[name].x, y - FOOT[name].y);
 }
 
-// 충돌 판정용 원을 빨간 선으로 그린다 (showHitbox가 true일 때만)
-function drawCircle(x, y, r) {
+function drawCircle(x, y, r) {   // 충돌 판정용 원 (showHitbox가 true일 때만)
   if (!showHitbox) return;
-  ctx.strokeStyle = "red";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.strokeStyle = "red"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
 }
 
 function drawWorld(step) {
@@ -699,89 +964,126 @@ function drawWorld(step) {
 
   ctx.drawImage(images.background, 0, 0);
 
-  ctx.fillStyle = "rgba(255, 244, 200, 0.35)";   // 레몬 크림색 먼지
-  for (const d of dust) {
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillStyle = "rgba(255, 244, 200, 0.35)";
+  for (const d of dust) { ctx.beginPath(); ctx.arc(d.x, d.y, 1.5, 0, Math.PI * 2); ctx.fill(); }
 
-  // 정수 (사라지기 3초 전부터 깜빡인다)
-  for (const k of pickups) {
+  for (const k of pickups) {   // 정수 (사라지기 3초 전부터 깜빡인다)
     if (k.life - k.t < 3 && Math.floor(k.t * 8) % 2 === 0) continue;
-    const bob = Math.sin(k.t * 6 + k.x) * 3;
-    drawSprite("essence", k.x, k.y + bob);
+    drawSprite("essence", k.x, k.y + Math.sin(k.t * 6 + k.x) * 3);
   }
 
-  // 대시 잔상
-  for (const e of effects) {
+  for (const e of effects) {   // 대시 잔상
     if (e.kind !== "ghost") continue;
     ctx.fillStyle = `rgba(255, 244, 200, ${0.3 * (1 - e.t / e.dur)})`;
-    ctx.beginPath();
-    ctx.ellipse(e.x, e.y - 36, 14, 30, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(e.x, e.y - 36, 14, 30, 0, 0, Math.PI * 2); ctx.fill();
   }
 
-  // 화면 위쪽에 있는 것부터 그려야 겹칠 때 앞뒤가 맞는다
   monsters.sort((a, b) => a.y - b.y);
   for (const m of monsters) if (m.y < player.y) drawMonster(m, step);
   drawCommander();
   for (const m of monsters) if (m.y >= player.y) drawMonster(m, step);
 
-  // 베기 궤적
-  for (const e of effects) {
-    if (e.kind !== "slash") continue;
-    const k = e.t / e.dur;
-    ctx.strokeStyle = `rgba(255, 244, 200, ${1 - k})`;
-    ctx.lineWidth = 10 * (1 - k) + 2;
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.r * (0.7 + 0.3 * k), e.a - e.half, e.a + e.half);
-    ctx.stroke();
+  // 병사의 화살과 노포
+  for (const pr of projectiles) {
+    const len = pr.kind === "ballista" ? 30 : 16, sp = Math.hypot(pr.vx, pr.vy) || 1;
+    ctx.strokeStyle = pr.kind === "ballista" ? "#c7a26a" : "#e9e4d6";
+    ctx.lineWidth = pr.kind === "ballista" ? 4 : 2;
+    ctx.beginPath(); ctx.moveTo(pr.x, pr.y); ctx.lineTo(pr.x - pr.vx / sp * len, pr.y - pr.vy / sp * len); ctx.stroke();
   }
 
-  // 결정 포식수의 빔
   for (const e of effects) {
-    if (e.kind !== "beam") continue;
     const k = e.t / e.dur;
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.shadowColor = COLOR.essence; ctx.shadowBlur = 24;
-    ctx.strokeStyle = `rgba(143, 216, 255, ${0.8 * (1 - k)})`; ctx.lineWidth = 22 * (1 - k) + 4;
-    ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
-    ctx.strokeStyle = `rgba(255, 255, 255, ${1 - k})`; ctx.lineWidth = 6 * (1 - k) + 1;
-    ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
-    ctx.restore();
+    if (e.kind === "slash") {
+      ctx.strokeStyle = `rgba(${e.color}, ${1 - k})`;
+      ctx.lineWidth = 10 * (1 - k) + 2;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (0.7 + 0.3 * k), e.a - e.half, e.a + e.half); ctx.stroke();
+    } else if (e.kind === "ring") {   // 포효 파동
+      ctx.strokeStyle = `rgba(140, 190, 230, ${1 - k})`; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r0 + (e.r1 - e.r0) * k, 0, Math.PI * 2); ctx.stroke();
+    } else if (e.kind === "beam") {
+      ctx.save();
+      ctx.lineCap = "round"; ctx.shadowColor = COLOR.essence; ctx.shadowBlur = 24;
+      ctx.strokeStyle = `rgba(143, 216, 255, ${0.8 * (1 - k)})`; ctx.lineWidth = 22 * (1 - k) + 4;
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${1 - k})`; ctx.lineWidth = 6 * (1 - k) + 1;
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.restore();
+    }
   }
 
-  // 떠오르는 글자
-  for (const e of effects) {
+  if (showHitbox) {
+    const p = player, a = atkStats(p);
+    ctx.strokeStyle = "red"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.arc(p.x, p.y, a.range, p.aim - a.half, p.aim + a.half); ctx.closePath(); ctx.stroke();
+    ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(p.x, p.y, p.magnet, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // 성벽, 병사, 테두리 어둠
+  ctx.drawImage(images.wall, 0, 0);
+  if (wallHp < WALL_MAX) {   // 깎인 만큼 균열
+    ctx.strokeStyle = "rgba(15, 17, 22, 0.75)"; ctx.lineWidth = 2;
+    const cracks = Math.floor((1 - wallHp / WALL_MAX) * 10);
+    for (let i = 0; i < cracks; i++) {
+      const cx = 40 + i * 67;
+      ctx.beginPath(); ctx.moveTo(cx, WALL_Y + 2); ctx.lineTo(cx + 8, WALL_Y + 20); ctx.lineTo(cx - 4, WALL_Y + 40); ctx.lineTo(cx + 6, WALL_Y + 72); ctx.stroke();
+    }
+  }
+  drawSoldiers();
+
+  for (const e of effects) {   // 떠오르는 글자
     if (e.kind !== "text") continue;
     ctx.globalAlpha = 1 - e.t / e.dur;
-    ctx.font = `600 ${e.size}px "Gowun Batang", serif`; ctx.textAlign = "center";
+    ctx.font = `600 ${e.size}px ${FONT}`; ctx.textAlign = "center";
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(10, 12, 16, 0.8)";
     ctx.strokeText(e.text, e.x, e.y - e.t * 40);
     ctx.fillStyle = e.color; ctx.fillText(e.text, e.x, e.y - e.t * 40);
     ctx.globalAlpha = 1;
   }
 
-  if (showHitbox) {   // 베기 범위(부채꼴)와 정수 끌어당김 범위
-    const p = player;
-    ctx.strokeStyle = "red"; ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.arc(p.x, p.y, PLAYER.atkRange, p.aim - PLAYER.atkHalf, p.aim + PLAYER.atkHalf);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.arc(p.x, p.y, PLAYER.magnet, 0, Math.PI * 2); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  ctx.drawImage(images.front, 0, 0);   // 성벽과 테두리 어둠은 맨 앞에
+  ctx.drawImage(images.vignette, 0, 0);
   ctx.restore();
 }
 
-// 웅크린 짐승 실루엣 (그림 파일이 없는 정수 포식자, 결정 포식수용). 연출 화면의 괴수와 같은 모양이다
+// 성벽 위 병사와 빈자리. 휴식 중에는 자리를 눌러 배치·강화할 수 있다
+function drawSoldiers() {
+  const interactive = gameState === "break" || gameState === "prep";
+  for (const slot of slots) {
+    const x = slot.x, y = WALL_Y + 8;
+    if (interactive && slot.unlocked) {
+      const bx = x - 30, by = WALL_Y - 40, bw = 60, bh = 84;
+      ctx.strokeStyle = slot.soldier ? "rgba(212, 160, 58, 0.5)" : "rgba(233, 228, 214, 0.7)";
+      ctx.setLineDash([5, 4]); ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.setLineDash([]);
+      buttons.push({ x: bx, y: by, w: bw, h: bh, onClick: () => clickSlot(slot) });
+    }
+    if (!slot.unlocked) {
+      ctx.fillStyle = "rgba(10, 12, 16, 0.5)";
+      ctx.beginPath(); ctx.arc(x, y - 10, 7, 0, Math.PI * 2); ctx.fill();
+      continue;
+    }
+    const s = slot.soldier;
+    if (!s) {
+      if (interactive) { ctx.fillStyle = COLOR.ink; ctx.font = `600 30px ${FONT}`; ctx.textAlign = "center"; ctx.fillText("+", x, y - 4); }
+      continue;
+    }
+    const ry = s.recoil * 20;   // 쏠 때 살짝 뒤로 밀린다
+    if (s.type === "ballista") {
+      ctx.fillStyle = "#5a4430"; ctx.fillRect(x - 18, y - 16 + ry, 36, 10);
+      ctx.fillStyle = "#8a7354"; ctx.fillRect(x - 3, y - 34 + ry, 6, 22);
+    } else {
+      ctx.fillStyle = "#3a4250"; ctx.fillRect(x - 6, y - 22 + ry, 12, 22);
+      ctx.fillStyle = "#4b5563"; ctx.beginPath(); ctx.arc(x, y - 27 + ry, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#8a7354"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x - 9, y - 16 + ry, 10, -1.2, 1.2); ctx.stroke();
+    }
+    for (let i = 0; i < s.level; i++) { ctx.fillStyle = COLOR.gold; ctx.fillRect(x - 10 + i * 8, y + 14, 5, 5); }
+    if (interactive && s.level < 3) {
+      ctx.fillStyle = "rgba(233, 228, 214, 0.7)"; ctx.font = `400 14px ${FONT}`; ctx.textAlign = "center";
+      ctx.fillText(`강화 ${upgradeCost(s)}`, x, y + 36);
+    }
+  }
+}
+
+// 웅크린 짐승 실루엣 (그림 파일이 없는 정수 포식자, 결정 포식수용)
 function beastShape(s, eye, plates) {
   ctx.fillStyle = COLOR.beast;
   ctx.fillRect(-17 * s, -14 * s, 7 * s, 14 * s);
@@ -809,8 +1111,7 @@ function beastShape(s, eye, plates) {
   ctx.restore();
 }
 
-// 등에 솟은 하늘색 결정
-function crystals(s, count, glow) {
+function crystals(s, count, glow) {   // 등에 솟은 하늘색 결정
   ctx.save();
   ctx.shadowColor = COLOR.essence; ctx.shadowBlur = 6 + glow * 14;
   for (let i = 0; i < count; i++) {
@@ -824,7 +1125,6 @@ function crystals(s, count, glow) {
   ctx.restore();
 }
 
-// 괴수: 맞으면 하얗게 번쩍이고, 보호막이 있으면 금속 막을 두르고, 체력이 깎였으면 막대가 보인다
 function drawMonster(m, step) {
   let lift = 0;
   if (m.type === "brute" && step < STEP_MOVE) lift = Math.sin((step / STEP_MOVE) * Math.PI) * 6;
@@ -832,8 +1132,7 @@ function drawMonster(m, step) {
   ctx.save();
   ctx.translate(m.x, m.y - lift);
 
-  // 결정 포식수의 빔 조준선 (차징 중). 마지막 순간엔 빨갛게 깜빡이며 고정된다
-  if (m.type === "crystal" && m.charge > 0) {
+  if (m.type === "crystal" && m.charge > 0) {   // 빔 조준선. 마지막 순간엔 빨갛게 깜빡이며 고정
     const locked = m.charge <= EAT.beamLock;
     const k = 1 - m.charge / EAT.beamCharge;
     ctx.strokeStyle = locked ? `rgba(255, 120, 110, ${0.5 + 0.4 * Math.sin(frame * 0.7)})` : `rgba(143, 216, 255, ${0.25 + 0.4 * k})`;
@@ -844,7 +1143,7 @@ function drawMonster(m, step) {
   if (m.flash > 0) ctx.filter = "brightness(3)";
   if (m.type === "eater") {
     const s = m.r / 18;
-    if (m.evolving > 0) {                       // 진화 중: 웅크리며 부풀고 빛이 새어 나온다
+    if (m.evolving > 0) {
       const k = 1 - m.evolving / EAT.evolveTime;
       ctx.scale(1 + k * 0.3, 1 - k * 0.15);
       const g = ctx.createRadialGradient(0, -m.r, 0, 0, -m.r, m.r * 3);
@@ -866,15 +1165,18 @@ function drawMonster(m, step) {
   }
   ctx.filter = "none";
 
-  if (m.shield > 0) {   // 몸을 덮은 회청색 금속 막
+  if (m.shield > 0) {   // 보호막: 몸을 덮은 회청색 금속 막
     const pulse = 0.5 + 0.2 * Math.sin(frame * 0.07 + m.x);
     ctx.fillStyle = `rgba(150, 170, 195, ${0.12 * pulse + 0.06})`;
     ctx.strokeStyle = `rgba(201, 214, 230, ${0.45 * pulse + 0.15})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.ellipse(0, -m.r * 0.95, m.r * 1.45, m.r * 1.15, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
+  if (m.slow > 0) {     // 둔화
+    ctx.fillStyle = "rgba(140, 190, 230, 0.25)";
+    ctx.beginPath(); ctx.ellipse(0, -m.r * 0.9, m.r * 1.15, m.r * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.restore();
 
-  // 막대: 보호막(위)과 체력(아래). 결정 포식수는 이름과 함께 항상 보인다
   const elite = m.type === "crystal";
   const bw = m.r * 2, bx = m.x - m.r;
   const by = elite ? m.y - m.r * 3.6 : m.y - m.r * 2 - 22;
@@ -887,7 +1189,7 @@ function drawMonster(m, step) {
     ctx.fillStyle = COLOR.shield; ctx.fillRect(bx, by - 6, bw * (m.shield / m.maxShield), 4);
   }
   if (elite) {
-    ctx.fillStyle = COLOR.essence; ctx.font = '600 14px "Gowun Batang", serif'; ctx.textAlign = "center";
+    ctx.fillStyle = COLOR.essence; ctx.font = `600 14px ${FONT}`; ctx.textAlign = "center";
     ctx.fillText("결정 포식수", m.x, by - 12);
   }
   drawCircle(m.x, m.y, m.r);
@@ -895,110 +1197,169 @@ function drawMonster(m, step) {
 
 function drawCommander() {
   const p = player;
-  if (p.downed > 0) {   // 쓰러져 있을 때: 흐리게, 남은 시간 표시
-    ctx.globalAlpha = 0.35;
-    drawSprite("commander", p.x, p.y);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#e9e4d6"; ctx.font = '600 18px "Gowun Batang", serif'; ctx.textAlign = "center";
+  if (p.downed > 0) {
+    ctx.globalAlpha = 0.35; drawSprite("commander", p.x, p.y); ctx.globalAlpha = 1;
+    ctx.fillStyle = COLOR.ink; ctx.font = `600 18px ${FONT}`; ctx.textAlign = "center";
     ctx.fillText(`재정비 ${Math.ceil(p.downed)}`, p.x, p.y - 100);
     return;
   }
-  const blink = p.invuln > 0 && Math.floor(frame / 3) % 2 === 0;   // 무적 중에는 깜빡인다
+  if (p.frenzy > 0) {   // 광폭화 중 붉은 기운
+    ctx.fillStyle = `rgba(230, 90, 70, ${0.22 + 0.1 * Math.sin(frame * 0.3)})`;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - 36, p.r * 1.6, p.r * 2.4, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  const blink = p.invuln > 0 && Math.floor(frame / 3) % 2 === 0;
   ctx.globalAlpha = blink ? 0.5 : 1;
   if (p.flash > 0) ctx.filter = "brightness(2.5)";
   if (Math.cos(p.aim) < 0) {
-    // 왼쪽을 조준할 때는 그림을 좌우로 뒤집어서 그린다
-    ctx.save();
-    ctx.translate(p.x, 0);
-    ctx.scale(-1, 1);
-    drawSprite("commander", 0, p.y);
-    ctx.restore();
+    ctx.save(); ctx.translate(p.x, 0); ctx.scale(-1, 1); drawSprite("commander", 0, p.y); ctx.restore();
   } else {
     drawSprite("commander", p.x, p.y);
   }
   ctx.filter = "none";
   ctx.globalAlpha = 1;
-  if (p.hp < PLAYER.maxHp) {   // 체력 막대 (깎였을 때만)
+  if (p.hp < p.maxHp) {
     const bw = 44, bx = p.x - bw / 2, by = p.y - 100;
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)"; ctx.fillRect(bx, by, bw, 5);
-    ctx.fillStyle = "#7fc28a"; ctx.fillRect(bx, by, bw * (p.hp / PLAYER.maxHp), 5);
+    ctx.fillStyle = "#7fc28a"; ctx.fillRect(bx, by, bw * (p.hp / p.maxHp), 5);
   }
-  drawCircle(p.x, p.y, PLAYER.r);
+  drawCircle(p.x, p.y, p.r);
 }
 
-// 글자 (웨이브, 성벽 체력, 정수, 점수, 대시)
-function drawText() {
-  const font = '"Gowun Batang", serif';
-
+// 재사용 대기 원 (대시, 스킬)
+function drawCooldown(x, y, key, label, ratio, empty) {
+  ratio = clamp(ratio, 0, 1);
+  const R = 24;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)"; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+  if (empty) {
+    ctx.strokeStyle = "rgba(233, 228, 214, 0.3)"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle = ratio > 0 ? "rgba(233, 228, 214, 0.4)" : COLOR.gold; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - ratio)); ctx.stroke();
+  }
   ctx.textAlign = "center";
-  ctx.fillStyle = "#e9e4d6";
-  ctx.font = `700 34px ${font}`;
-  ctx.fillText(`웨이브 ${wave} / 15`, W / 2, 64);
-  ctx.fillStyle = "rgba(233, 228, 214, 0.65)";
-  ctx.font = `400 20px ${font}`;
-  ctx.fillText(WAVE_TITLES[wave - 1], W / 2, 98);
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#e9e4d6";
-  ctx.font = `700 22px ${font}`;
-  ctx.fillText(`처치 ${kills}`, 30, 40);
-  ctx.textAlign = "right";
-  ctx.font = `400 20px ${font}`;
-  ctx.fillText(`${survived}초`, W - 30, 40);
+  ctx.fillStyle = empty || ratio > 0 ? "rgba(233, 228, 214, 0.5)" : COLOR.ink;
+  ctx.font = `600 ${key.length > 1 ? 12 : 16}px ${FONT}`; ctx.fillText(key, x, y + 5);
+  ctx.fillStyle = "rgba(233, 228, 214, 0.6)"; ctx.font = `400 12px ${FONT}`; ctx.fillText(label, x, y + R + 15);
+}
 
-  // 아래쪽 패널: 성벽 체력 막대
+function drawHUD() {
+  // 위쪽: 경험치 막대, 웨이브, 처치 수, 레벨
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)"; ctx.fillRect(0, 0, W, 5);
+  ctx.fillStyle = COLOR.gold; ctx.fillRect(0, 0, W * (xp / xpNext), 5);
+  ctx.textAlign = "center"; ctx.fillStyle = COLOR.ink; ctx.font = `700 34px ${FONT}`;
+  ctx.fillText(wave ? `웨이브 ${wave} / ${LAST_WAVE}` : "전투 준비", W / 2, 64);
+  if (wave) {
+    ctx.fillStyle = "rgba(233, 228, 214, 0.65)"; ctx.font = `400 20px ${FONT}`;
+    ctx.fillText(WAVE_TITLES[wave - 1], W / 2, 98);
+  }
+  ctx.textAlign = "left"; ctx.fillStyle = COLOR.ink; ctx.font = `700 22px ${FONT}`;
+  ctx.fillText(`처치 ${kills}`, 30, 42);
+  ctx.textAlign = "right"; ctx.font = `700 22px ${FONT}`;
+  ctx.fillText(`Lv ${level}`, W - 30, 42);
+
+  // 아래쪽 패널
   const panelY = WALL_Y + 80;
-  ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(233, 228, 214, 0.7)";
-  ctx.font = `400 18px ${font}`;
-  ctx.fillText("성벽", 40, panelY + 50);
-  ctx.fillStyle = "#1c2028";
-  ctx.fillRect(96, panelY + 34, 300, 20);
-  ctx.fillStyle = wallHp > WALL_MAX * 0.3 ? "#7c8188" : "#b8483e";   // 30% 아래면 붉게
-  ctx.fillRect(96, panelY + 34, 300 * (wallHp / WALL_MAX), 20);
-  ctx.fillStyle = "#e9e4d6";
-  ctx.font = `700 18px ${font}`;
-  ctx.fillText(wallHp, 410, panelY + 50);
+  ctx.textAlign = "left"; ctx.fillStyle = "rgba(233, 228, 214, 0.7)"; ctx.font = `400 18px ${FONT}`;
+  ctx.fillText("성벽", 30, panelY + 42);
+  ctx.fillStyle = "#1c2028"; ctx.fillRect(80, panelY + 27, 220, 18);
+  ctx.fillStyle = wallHp > WALL_MAX * 0.3 ? "#7c8188" : COLOR.blood;
+  ctx.fillRect(80, panelY + 27, 220 * (wallHp / WALL_MAX), 18);
+  ctx.fillStyle = COLOR.ink; ctx.font = `700 16px ${FONT}`;
+  ctx.fillText(wallHp, 310, panelY + 42);
+  drawSprite("essence", 44, panelY + 78);
+  ctx.font = `700 24px ${FONT}`; ctx.fillText(essenceCount, 66, panelY + 87);
 
-  // 정수 아이콘과 개수
-  drawSprite("essence", W - 120, panelY + 44);
-  ctx.font = `700 26px ${font}`;
-  ctx.fillText(essenceCount, W - 98, panelY + 54);
+  const p = player;
+  drawCooldown(W - 230, panelY + 52, "Space", "대시", p.dashTimer / p.dashCd, false);
+  ["Q", "E"].forEach((key, i) => {
+    const sk = p.skills[i];
+    if (!sk) { drawCooldown(W - 150 + i * 80, panelY + 52, key, "비어 있음", 0, true); return; }
+    const label = sk.id === "harvest" ? `수확 +${p.harvestBonus}` : SKILLS[sk.id].name;
+    drawCooldown(W - 150 + i * 80, panelY + 52, key, label, sk.timer / skillCd(p, sk.id), false);
+  });
 
-  // 대시 재사용 대기 (원이 다 차면 다시 쓸 수 있다)
-  const ready = player.dashTimer <= 0;
-  const ratio = ready ? 1 : 1 - player.dashTimer / PLAYER.dashCd;
-  ctx.strokeStyle = ready ? "#d4a03a" : "rgba(233, 228, 214, 0.4)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(W - 210, panelY + 44, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-  ctx.stroke();
-  ctx.textAlign = "center";
-  ctx.fillStyle = ready ? "#e9e4d6" : "rgba(233, 228, 214, 0.5)";
-  ctx.font = `400 13px ${font}`;
-  ctx.fillText("대시", W - 210, panelY + 49);
-
-  // 조작 안내
-  ctx.fillStyle = "rgba(233, 228, 214, 0.45)";
-  ctx.font = `400 16px ${font}`;
-  ctx.fillText("이동 WASD / 방향키   조준 마우스   베기 클릭(누르고 있기)   대시 Space", W / 2, panelY + 100);
+  // 웨이브 시작 배너
+  if (banner) {
+    const k = banner.t / banner.dur;
+    ctx.globalAlpha = k < 0.15 ? k / 0.15 : k > 0.8 ? (1 - k) / 0.2 : 1;
+    ctx.fillStyle = "rgba(6, 8, 12, 0.7)"; ctx.fillRect(0, 200, W, 120);
+    ctx.textAlign = "center"; ctx.fillStyle = COLOR.gold; ctx.font = `700 40px ${FONT}`;
+    ctx.fillText(banner.title, W / 2, 255);
+    ctx.fillStyle = COLOR.ink; ctx.font = `400 22px ${FONT}`;
+    ctx.fillText(banner.text, W / 2, 295);
+    ctx.globalAlpha = 1;
+  }
 }
 
-// 게임 오버 화면
-function drawGameOver() {
-  const font = '"Gowun Batang", serif';
-  ctx.fillStyle = "rgba(4, 6, 10, 0.75)";
-  ctx.fillRect(0, 0, W, H);
+// 버튼 하나를 그리고, 클릭할 수 있게 등록한다
+function button(x, y, w, h, label, sub, onClick, enabled = true, primary = false) {
+  ctx.fillStyle = primary ? "rgba(212, 160, 58, 0.92)" : enabled ? "rgba(28, 36, 48, 0.95)" : "rgba(18, 22, 30, 0.7)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = enabled ? "rgba(212, 160, 58, 0.7)" : "rgba(120, 110, 95, 0.4)"; ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
   ctx.textAlign = "center";
-  ctx.fillStyle = "#b8483e";
-  ctx.font = `700 56px ${font}`;
-  ctx.fillText("성벽이 무너졌다", W / 2, 540);
-  ctx.fillStyle = "#e9e4d6";
-  ctx.font = `400 26px ${font}`;
+  ctx.fillStyle = primary ? "#1a140a" : enabled ? COLOR.ink : "#6b6a63";
+  ctx.font = `700 ${sub ? 18 : 20}px ${FONT}`;
+  ctx.fillText(label, x + w / 2, y + (sub ? h / 2 - 2 : h / 2 + 7));
+  if (sub) { ctx.font = `400 14px ${FONT}`; ctx.fillStyle = primary ? "#3d3020" : "rgba(233, 228, 214, 0.7)"; ctx.fillText(sub, x + w / 2, y + h / 2 + 20); }
+  buttons.push({ x, y, w, h, onClick, enabled });
+}
+
+// 휴식·정비 시간 패널
+function drawBreakPanel() {
+  const prep = gameState === "prep";
+  const px = 60, py = 120, pw = W - 120, ph = prep ? 420 : 270;
+  ctx.fillStyle = "rgba(11, 15, 22, 0.92)"; ctx.fillRect(px, py, pw, ph);
+  ctx.textAlign = "center"; ctx.fillStyle = COLOR.gold; ctx.font = `700 30px ${FONT}`;
+  ctx.fillText(prep ? "정비 시간" : wave === 0 ? "전열 정비" : "숨 고르기", W / 2, py + 44);
+  ctx.fillStyle = COLOR.ink; ctx.font = `400 18px ${FONT}`;
+  ctx.fillText(`다음 웨이브까지 ${Math.ceil(breakTimer)}초`, W / 2, py + 76);
+  ctx.fillStyle = "rgba(233, 228, 214, 0.6)"; ctx.font = `400 15px ${FONT}`;
+  ctx.fillText("배치할 병사를 고르고 성벽 위 빈자리를 누른다 (다시 누르면 강화)", W / 2, py + 108);
+
+  let bx = px + 30;
+  for (const key of Object.keys(SOLDIERS)) {
+    const def = SOLDIERS[key], sel = selectedSoldier === key;
+    button(bx, py + 122, (pw - 80) / 2, 58, `${def.name}  ${def.cost}`, sel ? "선택됨" : "고르기", () => { selectedSoldier = key; }, true, sel);
+    bx += (pw - 80) / 2 + 20;
+  }
+  if (prep) {
+    const bw = (pw - 80) / 2;
+    SHOP.forEach((item, i) => {
+      const cost = item.cost();
+      const ok = item.can() && essenceCount >= cost;
+      const x = px + 30 + (i % 2) * (bw + 20), y = py + 200 + Math.floor(i / 2) * 76;
+      button(x, y, bw, 62, `${item.name}  ${cost}`, item.desc, () => { if (ok) { essenceCount -= cost; item.buy(); } }, ok);
+    });
+  }
+  button(W / 2 - 130, py + ph - 70, 260, 52, "웨이브 시작", null, () => { breakTimer = 0; }, true, true);
+}
+
+// 특전 고르기
+function drawLevelUp() {
+  ctx.fillStyle = "rgba(6, 8, 12, 0.6)"; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center"; ctx.fillStyle = COLOR.gold; ctx.font = `700 40px ${FONT}`;
+  ctx.fillText("사령관이 성장했다", W / 2, 360);
+  ctx.fillStyle = "rgba(233, 228, 214, 0.7)"; ctx.font = `400 18px ${FONT}`;
+  ctx.fillText("특전 하나를 고른다 (클릭 또는 1·2·3)", W / 2, 396);
+  perkChoices.forEach((perk, i) => {
+    button(110, 440 + i * 120, W - 220, 100, `${i + 1}. ${perk.name}`, perk.desc, () => choosePerk(perk));
+  });
+}
+
+// 게임 오버와 승리
+function drawEnd(victory) {
+  ctx.fillStyle = "rgba(4, 6, 10, 0.75)"; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center";
+  ctx.fillStyle = victory ? COLOR.gold : COLOR.blood; ctx.font = `700 52px ${FONT}`;
+  ctx.fillText(victory ? "협곡을 지켜 냈다" : "성벽이 무너졌다", W / 2, 540);
+  ctx.fillStyle = COLOR.ink; ctx.font = `400 26px ${FONT}`;
   ctx.fillText(`최종 점수: 처치 ${kills}`, W / 2, 610);
-  ctx.fillText(`웨이브 ${wave}까지 ${survived}초 버텼다`, W / 2, 650);
-  ctx.fillStyle = "rgba(233, 228, 214, 0.6)";
-  ctx.font = `400 20px ${font}`;
-  ctx.fillText("R 키를 눌러 다시 시작", W / 2, 720);
+  ctx.fillText(victory ? `${survived}초 동안 15웨이브를 버텼다` : `웨이브 ${wave}에서 ${survived}초 버텼다`, W / 2, 650);
+  ctx.fillText(`사령관 레벨 ${level}`, W / 2, 690);
+  ctx.fillStyle = "rgba(233, 228, 214, 0.6)"; ctx.font = `400 20px ${FONT}`;
+  ctx.fillText("R 키를 눌러 다시 시작", W / 2, 760);
 }
 
 // =====================================================
@@ -1012,9 +1373,9 @@ for (const name of names) {
   img.onload = function () {
     loaded = loaded + 1;
     if (loaded === names.length) {
-      resetGame();                         // 처음 상태를 만들고
+      resetGame();
       lastTime = performance.now();
-      requestAnimationFrame(gameLoop);     // 첫 시동 (루프는 이 한 번만 시작한다)
+      requestAnimationFrame(gameLoop);
     }
   };
   images[name] = img;
