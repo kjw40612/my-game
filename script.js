@@ -78,6 +78,7 @@ const BREAK_TIME = 8;       // 웨이브 사이 숨 고르기(초)
 const PREP_TIME = 30;       // 5·10웨이브 뒤 정비 시간(초). 상점이 열린다
 const START_ESSENCE = 30;   // 처음 가진 정수
 const EATER_FROM_WAVE = 6;  // 정수 포식자는 이 웨이브부터 나온다
+const REAPER_FROM_WAVE = 3; // 포식수는 이 웨이브부터 나온다
 
 const WAVE_TITLES = [
   "굶주린 무리가 협곡을 내려온다", "발 빠른 것들이 섞여 있다", "바람에 산성 냄새가 실려 온다",
@@ -96,6 +97,7 @@ const MONSTER_TYPES = {
   grunt:   { r: 16, hp: 30,  mass: 1,  speedMin: 0.8, speedMax: 1.3, wallDmg: 50,  drop: 1, xp: 1, aggro: 130, dmg: 6,  atkCd: 1.0 },
   brute:   { r: 36, hp: 120, shield: 30, mass: 4, speed: 1.4,      wallDmg: 150, drop: 4, xp: 5, aggro: 110, dmg: 18, atkCd: 1.6 },
   eater:   { r: 15, hp: 40,  mass: 0.8, speed: 90,                 wallDmg: 50,  drop: 2, xp: 3 },
+  reaper:  { r: 18, hp: 60,  mass: 1.5, speed: 120,                wallDmg: 0,   drop: 3, xp: 6, dmg: 20, atkCd: 3 },
   crystal: { r: 46, hp: 280, shield: 90, mass: 12, speed: 40, dmg: 24, atkCd: 1.4, wallDmg: 250, drop: 10, xp: 20 },
 };
 
@@ -107,6 +109,19 @@ const EAT = {
   beamCd: 6, beamCharge: 1.5, beamLock: 0.45,
   beamDmg: 40,          // 사령관이 맞았을 때 피해
   beamWallRatio: 1 / 3, // 빗나가서 성벽에 닿으면 성벽 최대 체력의 1/3
+};
+
+// 포식수 — 붉은 괴수. 성벽에는 관심이 없고, 체력이 낮아진 일반 괴수(굶주린 무리, 갑각 짐승)를 찾아가
+// "수확"으로 마무리해 잡아먹는다. 먹을 때마다 수확 피해, 몸집, 체력이 오른다.
+// 수확 3스택부터는 사령관도 공격한다. 단, 수확으로 마무리할 대상이 있으면 그쪽이 먼저다
+const REAPER = {
+  targetHp: 20,     // 체력이 이 값 이하인 일반 괴수를 노린다
+  reach: 22,        // 수확이 닿는 거리 (몸끼리 닿은 뒤 이만큼 더)
+  growDmg: 4,       // 먹을 때마다 수확 피해 증가
+  growR: 3,         // 먹을 때마다 몸집(반지름) 증가
+  growHp: 15,       // 먹을 때마다 최대 체력 증가 (그만큼 회복도 한다)
+  angerStacks: 3,   // 이만큼 쌓이면 사령관을 공격하기 시작한다
+  hoverY: 420,      // 할 일이 없을 때 머무는 높이
 };
 
 // 갑각 짐승의 묵직한 걸음 (4장)
@@ -265,6 +280,7 @@ function buildWave(n) {
   const pool = [{ type: "grunt", cost: 1, w: 5 }];
   if (n >= 2) pool.push({ type: "brute", cost: 4, w: 1 + n * 0.1 });
   if (n >= EATER_FROM_WAVE) pool.push({ type: "eater", cost: 3, w: 0.9 });
+  if (n >= REAPER_FROM_WAVE) pool.push({ type: "reaper", cost: 4, w: 0.5 });
   const totalW = pool.reduce((s, p) => s + p.w, 0);
 
   let t = 1.5;
@@ -301,7 +317,7 @@ function spawnMonster(type, x, y) {
     hp: t.hp * hpMul, maxHp: t.hp * hpMul,
     shield: (t.shield || 0) * hpMul, maxShield: (t.shield || 0) * hpMul,
     kvx: 0, kvy: 0, flash: 0, slow: 0, deflectT: 0, dead: false,
-    eaten: 0, evolving: 0, beamCd: EAT.beamCd, charge: 0, stagger: 0, aimX: 0, aimY: 1, atkTimer: rand(0, t.atkCd || 1),
+    eaten: 0, stacks: 0, harvestDmg: t.dmg || 0, evolving: 0, beamCd: EAT.beamCd, charge: 0, stagger: 0, aimX: 0, aimY: 1, atkTimer: rand(0, t.atkCd || 1),
   });
 }
 
@@ -430,6 +446,7 @@ function update(dt, step) {
     m.kvx *= decay; m.kvy *= decay;
     if (m.type === "eater") { updateEater(m, dt); continue; }
     if (m.type === "crystal") { updateCrystal(m, dt); continue; }
+    if (m.type === "reaper") { updateReaper(m, dt); continue; }
     updateMelee(m, step, dt);
   }
 
@@ -439,7 +456,7 @@ function update(dt, step) {
 
   // 괴수가 성벽에 닿으면: 성벽 체력을 깎고 그 괴수는 사라진다
   for (const m of monsters) {
-    if (!m.dead && m.y >= WALL_Y - 10) {
+    if (!m.dead && m.type !== "reaper" && m.y >= WALL_Y - 10) {   // 포식수는 성벽을 노리지 않는다
       wallHp = Math.max(0, wallHp - MONSTER_TYPES[m.type].wallDmg);
       shake = Math.max(shake, 8);
       m.dead = true;
@@ -688,7 +705,7 @@ function killMonster(m, source) {
   const p = player;
   if (source === "harvest") { p.harvestBonus += 4; addText(p.x, p.y - 110, "수확 +4", COLOR.gold, 0.8, 20); }
   if (p.downed <= 0 && p.healOnKill) p.hp = Math.min(p.maxHp, p.hp + p.healOnKill);
-  const drops = MONSTER_TYPES[m.type].drop + m.eaten;   // 정수 포식자 계열은 먹었던 정수도 돌려준다
+  const drops = MONSTER_TYPES[m.type].drop + m.eaten + m.stacks;   // 정수 포식자 계열은 먹었던 정수도, 포식수는 먹은 만큼 더 돌려준다
   const sp = drops > 8 ? 220 : 140;
   for (let n = 0; n < drops; n++) {
     pickups.push({ x: m.x, y: m.y - 4, vx: rand(-sp, sp), vy: rand(-sp, 60), t: 0, life: 14 });
@@ -856,6 +873,76 @@ function updatePickups(dt) {
     if (k.collected) essenceCount = essenceCount + 1;
   }
   pickups = pickups.filter(k => !k.collected && !k.eaten && k.t < k.life);
+}
+
+/* ---------- 포식수 ----------
+   우선순위: ① 체력 20 이하인 일반 괴수에게 가서 수확 ② (3스택 이상이면) 사령관을 쫓아가 수확
+   ③ 할 일이 없으면 전장 가운데쯤에서 어슬렁거린다. 성벽으로는 가지 않는다 */
+function reaperTarget(m) {
+  let best = null, bestD = Infinity;
+  for (const o of monsters) {
+    if (o === m || o.dead || o.y < 0) continue;
+    if (o.type !== "grunt" && o.type !== "brute") continue;   // 일반 괴수만
+    if (o.hp > REAPER.targetHp) continue;
+    const d = dist(m.x, m.y, o.x, o.y);
+    if (d < bestD) { bestD = d; best = o; }
+  }
+  return best;
+}
+
+function updateReaper(m, dt) {
+  const p = player;
+  const slowMul = m.slow > 0 ? 0.55 : 1;
+  m.atkTimer -= dt;
+
+  // ① 수확으로 마무리할 일반 괴수
+  const prey = reaperTarget(m);
+  if (prey) {
+    const d = dist(m.x, m.y, prey.x, prey.y);
+    if (d > m.r + prey.r + REAPER.reach) moveToward(m, prey.x, prey.y, m.speed * slowMul, dt);
+    else if (m.atkTimer <= 0) reaperHarvest(m, prey);
+    m.y = Math.min(m.y, WALL_Y - 120);
+    return;
+  }
+
+  // ② 3스택부터는 사령관을 노린다
+  if (m.stacks >= REAPER.angerStacks && p.downed <= 0) {
+    const d = dist(m.x, m.y, p.x, p.y);
+    if (d > m.r + p.r + REAPER.reach) moveToward(m, p.x, p.y, m.speed * slowMul, dt);
+    else if (m.atkTimer <= 0) {
+      effects.push({ kind: "slash", x: p.x, y: p.y - 30, a: Math.atan2(p.y - m.y, p.x - m.x) + Math.PI, r: 40, half: 1.2, t: 0, dur: 0.25, color: "220, 60, 50" });
+      hurtPlayer(m.harvestDmg, m.x, m.y, 30);
+      m.atkTimer = MONSTER_TYPES.reaper.atkCd;
+    }
+    m.y = Math.min(m.y, WALL_Y - 120);
+    return;
+  }
+
+  // ③ 할 일이 없으면 가운데 높이에서 좌우로 어슬렁거린다
+  const wanderX = W / 2 + Math.sin(frame * 0.01 + m.x * 0.01) * 180;
+  if (dist(m.x, m.y, wanderX, REAPER.hoverY) > 10) moveToward(m, wanderX, REAPER.hoverY, m.speed * 0.4 * slowMul, dt);
+}
+
+// 포식수의 수확: 대상을 베고, 그 일격으로 쓰러뜨리면 잡아먹고 강해진다.
+// 잡아먹힌 괴수는 정수를 떨어뜨리지 않고, 처치 수와 경험치도 오르지 않는다
+function reaperHarvest(m, prey) {
+  m.atkTimer = MONSTER_TYPES.reaper.atkCd;
+  const ang = Math.atan2(prey.y - m.y, prey.x - m.x);
+  effects.push({ kind: "slash", x: prey.x, y: prey.y - prey.r, a: ang + Math.PI, r: prey.r + 24, half: 1.2, t: 0, dur: 0.25, color: "220, 60, 50" });
+  let dmg = m.harvestDmg;
+  if (prey.shield > 0) { const a = Math.min(prey.shield, dmg); prey.shield -= a; dmg -= a; }
+  prey.hp -= dmg;
+  prey.flash = 0.09;
+  if (prey.hp > 0) return;
+
+  prey.dead = true;
+  m.stacks++;
+  m.harvestDmg += REAPER.growDmg;
+  m.r += REAPER.growR;
+  m.maxHp += REAPER.growHp;
+  m.hp = Math.min(m.maxHp, m.hp + REAPER.growHp);
+  burst(prey.x, prey.y - prey.r, COLOR.blood, 8);
+  addText(m.x, m.y - m.r * 2 - 14, m.stacks === REAPER.angerStacks ? "포식수가 사령관을 노린다" : `수확 ${m.stacks}`, "#ff6a5a", 1.2, m.stacks === REAPER.angerStacks ? 22 : 18);
 }
 
 /* ---------- 정수 포식자 ----------
@@ -1196,9 +1283,15 @@ function drawSoldiers() {
   }
 }
 
+// 맞은 순간 번쩍임. 그림 파일(drawImage 한 번)은 brightness 필터로 하얗게 만들지만,
+// 코드로 그린 괴수는 도형 수십 개 + 빛 번짐이라 필터를 켜면 도형마다 계산돼 화면이 버벅인다.
+// 그래서 코드로 그린 괴수는 필터 대신 몸 색만 밝은 색으로 바꿔 그린다
+let flashing = false;
+const FLASH_BODY = "#dfe6ee";
+
 // 웅크린 짐승 실루엣 (그림 파일이 없는 정수 포식자, 결정 포식수용)
-function beastShape(s, eye, plates) {
-  ctx.fillStyle = COLOR.beast;
+function beastShape(s, eye, plates, body) {
+  ctx.fillStyle = flashing ? FLASH_BODY : (body || COLOR.beast);
   ctx.fillRect(-17 * s, -14 * s, 7 * s, 14 * s);
   ctx.fillRect(10 * s, -14 * s, 7 * s, 14 * s);
   ctx.beginPath();
@@ -1216,7 +1309,7 @@ function beastShape(s, eye, plates) {
   }
   ctx.strokeStyle = "rgba(170, 190, 215, 0.22)"; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(-22 * s, -24 * s); ctx.quadraticCurveTo(0, -46 * s, 22 * s, -24 * s); ctx.stroke();
-  ctx.fillStyle = COLOR.beast;
+  ctx.fillStyle = flashing ? FLASH_BODY : (body || COLOR.beast);
   ctx.beginPath(); ctx.ellipse(0, -14 * s, 11 * s, 9 * s, 0, 0, Math.PI * 2); ctx.fill();
   ctx.save();
   ctx.shadowColor = eye; ctx.shadowBlur = 8; ctx.fillStyle = eye;
@@ -1253,7 +1346,8 @@ function drawMonster(m, step) {
     ctx.beginPath(); ctx.moveTo(0, -m.r); ctx.lineTo(m.aimX * 1500, -m.r + m.aimY * 1500); ctx.stroke();
   }
 
-  if (m.flash > 0) ctx.filter = "brightness(3)";
+  const coded = m.type === "eater" || m.type === "crystal" || m.type === "reaper";   // 코드로 그린 괴수인가
+  if (m.flash > 0) { if (coded) flashing = true; else ctx.filter = "brightness(3)"; }
   if (m.type === "eater") {
     const s = m.r / 18;
     if (m.evolving > 0) {
@@ -1268,6 +1362,16 @@ function drawMonster(m, step) {
       beastShape(s, "#bfe8ff", false);
       if (m.eaten > 0) crystals(s, Math.min(m.eaten, 5), 0);
     }
+  } else if (m.type === "reaper") {   // 붉은 몸, 쌓은 스택만큼 등에 붉은 가시
+    const s = m.r / 18;
+    beastShape(s, "#ffb08a", false, "#6e1c20");
+    if (!flashing) {
+      ctx.fillStyle = "#c8443a";
+      for (let i = 0; i < Math.min(m.stacks, 6); i++) {
+        const bx = (i - (Math.min(m.stacks, 6) - 1) / 2) * 7 * s;
+        ctx.beginPath(); ctx.moveTo(bx - 3 * s, -38 * s); ctx.lineTo(bx, -50 * s); ctx.lineTo(bx + 3 * s, -38 * s); ctx.fill();
+      }
+    }
   } else if (m.type === "crystal") {
     const s = m.r / 18;
     const glow = m.charge > 0 ? 1 - m.charge / EAT.beamCharge : 0;
@@ -1277,6 +1381,7 @@ function drawMonster(m, step) {
     drawSprite(m.type, 0, 0);
   }
   ctx.filter = "none";
+  flashing = false;
 
   if (m.shield > 0) {   // 보호막: 몸을 덮은 회청색 금속 막
     const pulse = 0.5 + 0.2 * Math.sin(frame * 0.07 + m.x);
